@@ -1,0 +1,351 @@
+body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; background: #87CEEB; }
+
+#crosshair {
+    position: absolute; top: 50%; left: 50%; width: 20px; height: 20px;
+    background: transparent; border: 2px solid rgba(255, 255, 255, 0.5);
+    border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; z-index: 10;
+    display: none; 
+}
+#crosshair::after {
+    content: ''; position: absolute; top: 50%; left: 50%; width: 4px; height: 4px;
+    background: white; transform: translate(-50%, -50%); border-radius: 50%;
+}
+
+#ui {
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 10px; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 8px; pointer-events: none;
+    display: none; 
+    width: auto; justify-content: center;
+    z-index: 20;
+}
+.slot {
+    width: 40px; height: 40px; border: 2px solid #555; background: rgba(0,0,0,0.3);
+    display: flex; justify-content: center; align-items: center; 
+    position: relative;
+    flex-shrink: 0;
+    cursor: pointer;
+    pointer-events: auto;
+}
+.slot:hover { border-color: #aaa; }
+.slot.active { border-color: #fff; background: rgba(255,255,255,0.2); transform: scale(1.1); }
+.slot .count { 
+    position: absolute; bottom: 2px; right: 2px; 
+    font-size: 10px; color: #fff; text-shadow: 1px 1px 0 #000; font-weight: bold; 
+}
+
+/* Durability Bar Styles */
+.durability-bar-container {
+    position: absolute;
+    bottom: 4px;
+    left: 4px;
+    right: 4px;
+    height: 3px;
+    background: rgba(0,0,0,0.5);
+    pointer-events: none;
+}
+.durability-bar-fill {
+    height: 100%;
+    transition: width 0.1s;
+}
+
+#instructions {
+    position: fixed; top: 10px; left: 10px; color: white;
+    background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px;
+    pointer-events: none; user-select: none;
+    z-index: 120;
+    display: none;
+}
+#save-status {
+    position: absolute; top: 10px; right: 10px; color: #00FF00; font-weight: bold; display: none;
+    background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 4px;
+}
+#link-hover {
+    position: absolute; top: 55%; left: 50%; transform: translate(-50%, -50%);
+    color: #00FFFF; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+    display: none; pointer-events: none; background: rgba(0,0,0,0.6); padding: 5px 10px; border-radius: 4px;
+}
+#debug {
+    position: fixed; top: 40px; right: 10px; color: #ffffff; font-size: 12px;
+    line-height: 1.15; white-space: pre; text-align: right; pointer-events: none; display: none;
+    z-index: 120;
+}
+
+#player-fire-overlay {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 22vh;
+    min-height: 100px;
+    max-height: 190px;
+    pointer-events: none;
+    z-index: 8;
+    display: none;
+    opacity: 0;
+    overflow: hidden;
+}
+
+#player-fire-overlay-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    image-rendering: pixelated;
+}
+
+#health-hud {
+    position: absolute;
+    left: 50%;
+    bottom: 82px;
+    transform: translateX(-50%);
+    display: none;
+    flex-direction: row;
+    gap: 2px;
+    pointer-events: none;
+    z-index: 21;
+}
+
+#bow-charge-ui {
+    position: absolute;
+    left: 50%;
+    bottom: 64px;
+    width: 180px;
+    height: 10px;
+    transform: translateX(-50%);
+    border: 2px solid rgba(0, 0, 0, 0.85);
+    background: rgba(30, 30, 30, 0.75);
+    pointer-events: none;
+    z-index: 21;
+}
+
+#bow-charge-ui.hidden {
+    display: none;
+}
+
+#bow-charge-fill {
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, #8f4f24 0%, #d98b3a 100%);
+}
+
+.heart-slot {
+    width: 18px;
+    height: 18px;
+    background-image: url('assets/textures/gui/icons.png');
+    background-repeat: no-repeat;
+    background-size: 512px 512px;
+    image-rendering: pixelated;
+}
+
+/* --- Chat Styles --- */
+#chat-container {
+    position: absolute; bottom: 20px; left: 20px; width: 400px; height: 300px;
+    display: flex; flex-direction: column; justify-content: flex-end;
+    pointer-events: none; z-index: 200;
+}
+#chat-container.chat-open {
+    background: rgba(0,0,0,0.5); pointer-events: auto;
+}
+#chat-history {
+    overflow-y: auto; flex-grow: 1; display: flex; flex-direction: column; justify-content: flex-end;
+    scrollbar-width: none; /* Firefox */
+}
+#chat-history::-webkit-scrollbar { display: none; }
+.chat-message {
+    color: white; text-shadow: 1px 1px 0 #000; font-size: 16px; margin: 2px 0; word-wrap: break-word;
+    opacity: 1; transition: opacity 1s; padding: 2px 5px;
+}
+.msg-expired { opacity: 0; }
+#chat-container.chat-open .msg-expired { opacity: 1; }
+#chat-input {
+    background: rgba(0,0,0,0.5); border: 1px solid #888; color: white; padding: 5px;
+    width: 100%; box-sizing: border-box; font-family: inherit; font-size: 16px;
+    display: none; pointer-events: auto;
+}
+#chat-container.chat-open #chat-input { display: block; }
+#chat-history a { color: #00FFFF; text-decoration: underline; cursor: pointer; pointer-events: auto; }
+
+.screen {
+    display: flex; 
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    z-index: 100;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: white;
+}
+.screen.hidden { display: none !important; }
+
+h1 { margin-bottom: 20px; font-size: 4rem; text-shadow: 4px 4px #000; color: #fff; letter-spacing: 2px; }
+h2 { border-bottom: 2px solid #555; padding-bottom: 10px; margin-bottom: 20px; width: 100%; text-align: center; }
+
+.menu-box {
+    background: rgba(50, 50, 50, 0.9);
+    padding: 30px;
+    border-radius: 12px;
+    width: 400px;
+    border: 1px solid #666;
+    box-shadow: 0 0 20px rgba(0,0,0,0.5);
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+button {
+    display: block; width: 100%; padding: 12px; margin: 10px 0;
+    background: #444; color: white; border: 2px solid #222; cursor: pointer;
+    font-size: 1.1rem; border-radius: 0;
+    transition: all 0.1s;
+}
+button:hover { background: #666; border-color: #888; }
+button:active { transform: translateY(2px); }
+button.primary { background: #2e7d32; border-color: #1b5e20; }
+button.primary:hover { background: #388e3c; }
+button.danger { background: #c62828; border-color: #b71c1c; }
+button.danger:hover { background: #d32f2f; }
+button.active { background: #0078d7; border-color: #00aaff; }
+
+input[type="text"] {
+    width: 100%; padding: 10px; margin-bottom: 15px;
+    background: #222; border: 1px solid #555; color: white;
+    font-size: 1rem;
+    box-sizing: border-box;
+}
+label { display: block; margin-bottom: 5px; color: #aaa; font-size: 0.9rem; }
+
+.world-item {
+    background: #222; border: 1px solid #444; padding: 10px; margin-bottom: 8px;
+    display: flex; justify-content: space-between; align-items: center;
+    cursor: pointer;
+}
+.world-item:hover { background: #333; border-color: #666; }
+.world-info b { display: block; font-size: 1.1rem; color: #fff; }
+.world-info small { color: #888; }
+
+/* --- Inventory / Crafting --- */
+#inventory-screen, #crafting-table-screen, #furnace-screen, #chest-screen {
+    background: rgba(0,0,0,0.7);
+    z-index: 50; 
+}
+
+.inv-container {
+    background: #c6c6c6;
+    padding: 10px;
+    border: 2px solid #555;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    width: auto; 
+    min-width: 500px;
+}
+
+.inv-section {
+    background: #8b8b8b;
+    padding: 10px;
+    border: 2px solid #373737;
+    border-bottom-color: #fff;
+    border-right-color: #fff;
+}
+
+.inv-label {
+    color: #404040;
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+.grid-crafting {
+    display: grid;
+    grid-template-columns: repeat(2, 40px);
+    grid-gap: 4px;
+}
+
+.grid-crafting-3x3 {
+    display: grid;
+    grid-template-columns: repeat(3, 40px);
+    grid-gap: 4px;
+}
+
+.grid-main, .grid-hotbar {
+    display: grid;
+    grid-template-columns: repeat(10, 40px);
+    grid-gap: 4px;
+}
+
+.craft-area {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    justify-content: center;
+}
+
+.craft-arrow {
+    font-size: 24px;
+    color: #404040;
+}
+
+/* --- Furnace UI --- */
+.furnace-area {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+}
+.furnace-col {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+.furnace-arrow-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+}
+.fire-icon {
+    width: 20px; height: 20px;
+    background: #555;
+    mask-image: url('data:image/svg+xml;utf8,<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 23c-4.97 0-9-4.03-9-9 0-4.97 9-13 9-13s9 8.03 9 13c0 4.97-4.03 9-9 9z"/></svg>');
+    -webkit-mask-image: url('data:image/svg+xml;utf8,<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 23c-4.97 0-9-4.03-9-9 0-4.97 9-13 9-13s9 8.03 9 13c0 4.97-4.03 9-9 9z"/></svg>');
+    mask-repeat: no-repeat;
+    mask-position: center;
+}
+
+#cursor-item {
+    position: fixed;
+    pointer-events: none;
+    z-index: 1000;
+    width: 32px; height: 32px;
+}
+#cursor-item .count {
+    position: absolute; bottom: 0; right: 0;
+    color: #fff; text-shadow: 1px 1px 0 #000; font-weight: bold;
+}
+
+.loading-box {
+    width: 460px;
+}
+
+.loading-bar-shell {
+    width: 100%;
+    height: 18px;
+    border: 2px solid #333;
+    background: #111;
+    margin: 12px 0;
+}
+
+.loading-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #2e7d32, #66bb6a);
+    transition: width 0.12s linear;
+}
+
+#world-loading-status {
+    color: #ddd;
+    margin-bottom: 8px;
+}
+
+#world-loading-percent {
+    color: #fff;
+    font-weight: bold;
+    text-align: right;
+}
