@@ -1,6 +1,7 @@
 // js/main.js
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import { saveStore } from './js/saveStore.js';
 import { parseKey, getChunkKey, getKey } from './js/utils.js';
 import { CHUNK_SIZE, WORLD_DEPTH, WORLD_HEIGHT, JUMP_FORCE, PLAYER_HEIGHT, PLAYER_HEIGHT_CROUCH, PLAYER_EYE_HEIGHT, PLAYER_EYE_HEIGHT_CROUCH, PLAYER_RADIUS } from './js/constants.js';
 import { RenderChunk, textureLoader, getTextureUrl, BLOCKS, breakingTextures, updateFireAnimation, updatePortalAnimation, getFireAnimationCanvas } from './js/world.js';
@@ -9444,7 +9445,7 @@ function updateHover() {
 }
 
 function getSavesIndex() {
-    try { return JSON.parse(localStorage.getItem('mindblock_saves') || '[]'); } catch(e) { return []; }
+    try { return JSON.parse(saveStore.getItem('mindblock_saves') || '[]'); } catch(e) { return []; }
 }
 
 function toggleDoorAt(x, y, z) {
@@ -9686,7 +9687,7 @@ function saveGame() {
         const {x,y,z} = parseKey(key);
         data.links.push({ x, y, z, url: val.url });
     });
-    localStorage.setItem('mindblock_data_' + CURRENT_WORLD_ID, JSON.stringify(data));
+    saveStore.setItem('mindblock_data_' + CURRENT_WORLD_ID, JSON.stringify(data));
     const saveStatus = document.getElementById('save-status');
     if (saveStatus) {
         saveStatus.style.display = 'block';
@@ -9805,7 +9806,7 @@ function loadWorld(id) {
     mobManager.clear();
     if (tntManager) tntManager.clear();
 
-    const rawData = localStorage.getItem('mindblock_data_' + id);
+    const rawData = saveStore.getItem('mindblock_data_' + id);
     initTerrain(saveMeta.seed);
     let startPos = { x: 0, y: WORLD_HEIGHT - 2, z: 0, rx: 0, ry: 0, health: PLAYER_MAX_HEALTH, flyEnabled: false, isFlying: false, flyFastEnabled: false };
     let hasSavedPlayer = false;
@@ -10578,7 +10579,7 @@ bindUIWindowFunctions({
         const newSave = { id, name: nameVal, seed: s, lastPlayed: Date.now() };
         const saves = getSavesIndex();
         saves.push(newSave);
-        localStorage.setItem('mindblock_saves', JSON.stringify(saves));
+        saveStore.setItem('mindblock_saves', JSON.stringify(saves));
         initTerrain(s);
         const initialData = {
             modified: [],
@@ -10586,14 +10587,14 @@ bindUIWindowFunctions({
             mobsOverworld: { pigs: [], chickens: [], sheep: [], cows: [], creepers: [], zombies: [], spiders: [], skeletons: [], zombiePigmen: [], slimes: [], ghasts: [], squids: [], wolves: [] },
             mobsNether: { pigs: [], chickens: [], sheep: [], cows: [], creepers: [], zombies: [], spiders: [], skeletons: [], zombiePigmen: [], slimes: [], ghasts: [], squids: [], wolves: [] }
         };
-        localStorage.setItem('mindblock_data_' + id, JSON.stringify(initialData));
+        saveStore.setItem('mindblock_data_' + id, JSON.stringify(initialData));
         loadWorld(id);
     },
     windowDeleteWorld: (id) => {
         let saves = getSavesIndex();
         saves = saves.filter(s => s.id !== id);
-        localStorage.setItem('mindblock_saves', JSON.stringify(saves));
-        localStorage.removeItem('mindblock_data_' + id);
+        saveStore.setItem('mindblock_saves', JSON.stringify(saves));
+        saveStore.removeItem('mindblock_data_' + id);
         window.showWorldList();
     },
     saveAndQuit: () => {
@@ -12314,14 +12315,14 @@ function createAndLoadChunkSoakWorld(seed = '12345', name = 'Chunk Soak Test') {
     const s = BigInt.asIntN(64, parsedSeed).toString();
     const saves = getSavesIndex();
     saves.push({ id, name, seed: s, lastPlayed: Date.now() });
-    localStorage.setItem('mindblock_saves', JSON.stringify(saves));
+    saveStore.setItem('mindblock_saves', JSON.stringify(saves));
     const initialData = {
         modified: [],
         links: [],
         mobsOverworld: { pigs: [], chickens: [], sheep: [], cows: [], creepers: [], zombies: [], spiders: [], skeletons: [], zombiePigmen: [], slimes: [], ghasts: [], squids: [], wolves: [] },
         mobsNether: { pigs: [], chickens: [], sheep: [], cows: [], creepers: [], zombies: [], spiders: [], skeletons: [], zombiePigmen: [], slimes: [], ghasts: [], squids: [], wolves: [] }
     };
-    localStorage.setItem('mindblock_data_' + id, JSON.stringify(initialData));
+    saveStore.setItem('mindblock_data_' + id, JSON.stringify(initialData));
     loadWorld(id);
     return id;
 }
