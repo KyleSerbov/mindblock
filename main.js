@@ -10178,14 +10178,16 @@ function isSlimeChunkAt(cx, cz, seedString = null) {
     const s = seedString ?? getCurrentWorldSeedString();
     if (s == null) return false;
     const worldSeed = parseMinecraftSeed(String(s));
-    const x = BigInt(Math.floor(cx));
-    const z = BigInt(Math.floor(cz));
-    const chunkSeed = (
+    const x = Math.floor(cx);
+    const z = Math.floor(cz);
+    // Chunk.getRandomWithSeed: x*x*4987142, x*5947611, z*z and z*389711 are Java int
+    // products (they overflow); only (long)(z*z) * 4392871L is widened before multiplying.
+    const chunkSeed = BigInt.asIntN(64,
         worldSeed +
-        (x * x * 4987142n) +
-        (x * 5947611n) +
-        (z * z * 4392871n) +
-        (z * 389711n)
+        BigInt(Math.imul(Math.imul(x, x), 4987142)) +
+        BigInt(Math.imul(x, 5947611)) +
+        BigInt(Math.imul(z, z)) * 4392871n +
+        BigInt(Math.imul(z, 389711))
     ) ^ 987234911n;
     const rng = new JavaRandom(chunkSeed);
     return rng.nextInt(10) === 0;

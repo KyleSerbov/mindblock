@@ -3996,10 +3996,9 @@ export class MobManager {
         switch (type) {
             case 'squid':
                 return this.isBetaBoxClearOfEntities(box);
-            case 'slime': {
-                const slimeChunk = this.isSlimeChunk ? !!this.isSlimeChunk(Math.floor(bx / CHUNK_SIZE), Math.floor(bz / CHUNK_SIZE)) : false;
-                return (size === 1 || difficulty > 0) && randInt(10) === 0 && slimeChunk && y < 16;
-            }
+            case 'slime':
+                return (size === 1 || difficulty > 0) && randInt(10) === 0 && y < 16 &&
+                    !!this.isSlimeChunk && !!this.isSlimeChunk(Math.floor(bx / CHUNK_SIZE), Math.floor(bz / CHUNK_SIZE));
             case 'ghast':
                 return randInt(20) === 0 && livingOk() && difficulty > 0;
             case 'zombie_pigman':
