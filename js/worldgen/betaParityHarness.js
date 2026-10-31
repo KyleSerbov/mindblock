@@ -2260,7 +2260,9 @@ export class BetaParityHarness {
     }
 
     this.setGeneratedBlock(wx, wy, wz, 52, true); // spawner Beta 52
-    rng.nextInt(4); // Match pickMobSpawner RNG call.
+    // WorldGenDungeons.pickMobSpawner: 0 Skeleton, 1-2 Zombie, 3 Spider. Stored as metadata + 1
+    // so the spawner's mob type survives into runtime chunk data.
+    this.chunkManager.setMetadata(wx, wy, wz, rng.nextInt(4) + 1);
     return true;
   }
 

@@ -62,10 +62,24 @@ export class Chunk {
 export class ChunkManager {
     constructor() {
         this.chunks = new Map();
+        // Bumped whenever a column's blocks change so derived caches (spawn lighting) can revalidate.
+        this.columnRevisions = new Map();
+        this.columnEpoch = 0;
     }
 
     clear() {
         this.chunks.clear();
+        this.columnRevisions.clear();
+        this.columnEpoch++;
+    }
+
+    bumpColumnRevision(cx, cz) {
+        const key = `${cx},${cz}`;
+        this.columnRevisions.set(key, (this.columnRevisions.get(key) || 0) + 1);
+    }
+
+    getColumnRevision(cx, cz) {
+        return this.columnRevisions.get(`${cx},${cz}`) || 0;
     }
 
     addChunk(cx, cy, cz, data) {
@@ -75,7 +89,8 @@ export class ChunkManager {
             chunk = new Chunk(cx, cy, cz);
             this.chunks.set(key, chunk);
         }
-        
+        this.bumpColumnRevision(cx, cz);
+
         if (data) {
             for (let i = 0; i < data.length; i++) {
                 const runtimeId = Number(data[i]);
@@ -111,7 +126,7 @@ export class ChunkManager {
 
     removeChunk(cx, cy, cz) {
         const key = getChunkKey(cx * CHUNK_SIZE, cy * CHUNK_SIZE, cz * CHUNK_SIZE);
-        this.chunks.delete(key);
+        if (this.chunks.delete(key)) this.bumpColumnRevision(cx, cz);
     }
 
     getBlock(x, y, z) {
@@ -141,6 +156,7 @@ export class ChunkManager {
         const ly = (y % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
         const lz = (z % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
 
+        if (chunk.getBlock(lx, ly, lz) !== Number(id)) this.bumpColumnRevision(cx, cz);
         chunk.setBlock(lx, ly, lz, id);
     }
     

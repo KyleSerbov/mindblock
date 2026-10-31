@@ -1532,6 +1532,21 @@ function getJacoboInitialSpawn(seed, dimension = 'OVERWORLD') {
     return { x: sx, y: 64, z: sz, rx: 0, ry: 0 };
 }
 
+let cachedWorldSpawnPoint = null;
+let cachedWorldSpawnWorldId = null;
+
+// World spawn in Beta block coordinates; the Nether shares the overworld's WorldInfo spawn.
+function getCachedWorldSpawnPoint() {
+    if (!CURRENT_WORLD_ID) return null;
+    if (cachedWorldSpawnWorldId !== CURRENT_WORLD_ID) {
+        const seed = getCurrentWorldSeedString();
+        if (seed == null) return null;
+        cachedWorldSpawnWorldId = CURRENT_WORLD_ID;
+        cachedWorldSpawnPoint = getJacoboInitialSpawn(seed, 'OVERWORLD');
+    }
+    return cachedWorldSpawnPoint;
+}
+
 function getSurfaceSpawnY(x, z) {
     const bestKnownTop = getBestKnownSurfaceTopY(x, z, { allowParity: false });
     const surfaceY = bestKnownTop + 3;
@@ -2076,6 +2091,11 @@ const mobManager = new MobManager(scene, chunkManager, {
     getDaylightFactor: () => {
         return getDayBrightness01(worldTimeTicks);
     },
+    // WorldProviderHell fixes the celestial angle at 0.5, which gives 11.
+    getSkylightSubtracted: () => (CURRENT_DIMENSION === 'NETHER' ? 11 : calculateSkylightSubtractedBeta(worldTimeTicks)),
+    // MindBlock has no difficulty setting; Beta worlds default to Normal.
+    getDifficulty: () => 2,
+    getWorldSpawnPoint: () => getCachedWorldSpawnPoint(),
     getDimension: () => CURRENT_DIMENSION,
     getBiomeAt: (x, z) => {
         if (CURRENT_DIMENSION !== 'OVERWORLD') return 'hell';
@@ -8914,6 +8934,15 @@ function interact() {
             return;
         }
         const meta = chunkManager.getMetadata(x, y, z) & 15;
+        // Beta: a monster that can path to the bed spawns beside it and wakes the player
+        // (SpawnerAnimals.performSleepSpawning); the night isn't skipped and no spawn is set.
+        const headOff = getBedHeadOffset(meta);
+        const headX = (meta & 8) !== 0 ? x : x + headOff.x;
+        const headZ = (meta & 8) !== 0 ? z : z + headOff.z;
+        const headMeta = chunkManager.getMetadata(headX, y, headZ) & 15;
+        if (mobManager.performBetaSleepSpawning(headX, y, headZ, headMeta)) {
+            return;
+        }
         bedRespawnPoint = getBedRespawnPointFromBlock(x, y, z, meta);
         setWorldTimeTicks(WAKE_MORNING_TICKS);
         scheduleSaveGame();
@@ -12759,38 +12788,20 @@ window.chunkTest = {
         if (!Number.isFinite(sx) || !Number.isFinite(sz)) return { ok: false, msg: 'Invalid coordinates.' };
         return mobManager.spawnMobNear(t, sx, sz, null, false);
     },
-    tryNaturalSpawnTypeAt: (type, x, z) => {
-        const t = String(type || '').toLowerCase();
-        const sx = Number(x);
-        const sz = Number(z);
-        if (!Number.isFinite(sx) || !Number.isFinite(sz)) return false;
-        if (typeof mobManager.debugTrySpawnTypeAt !== 'function') return false;
-        return !!mobManager.debugTrySpawnTypeAt(t, sx, sz, camera.position);
+    // Headless automation can't take pointer lock, so resume() would re-pause; run unpaused instead.
+    forceResume: () => {
+        setPausedState(false);
+        return !IS_PAUSED;
     },
-    tryNaturalSpawnGroupInChunk: (type, cx, cz, maxToSpawn = 32) => {
-        if (typeof mobManager.debugTrySpawnGroupInChunk !== 'function') return 0;
-        return Number(mobManager.debugTrySpawnGroupInChunk(type, cx, cz, camera.position, maxToSpawn)) || 0;
+    canBetaSpawnAt: (type, x, y, z, size = 1) => {
+        if (typeof mobManager.debugCanBetaSpawnAt !== 'function') return false;
+        return !!mobManager.debugCanBetaSpawnAt(type, x, y, z, size);
     },
-    canNaturalSpawnTypeInBiome: (type, biome) => {
-        if (typeof mobManager.debugCanNaturalSpawnTypeInBiome !== 'function') return false;
-        return !!mobManager.debugCanNaturalSpawnTypeInBiome(type, biome);
+    getBetaLight: (x, y, z) => {
+        if (typeof mobManager.debugGetBetaLight !== 'function') return null;
+        return mobManager.debugGetBetaLight(x, y, z);
     },
-    getSpawnGroupBounds: (type) => {
-        if (typeof mobManager.debugGetSpawnGroupBounds !== 'function') return null;
-        return mobManager.debugGetSpawnGroupBounds(type);
-    },
-    getPassiveSpawnWeightsForBiome: (biome) => {
-        if (typeof mobManager.debugGetPassiveSpawnWeightsForBiome !== 'function') return [];
-        return mobManager.debugGetPassiveSpawnWeightsForBiome(biome);
-    },
-    debugEvaluateHostileDespawn: (input = {}) => {
-        if (typeof mobManager.debugEvaluateHostileDespawn !== 'function') return null;
-        return mobManager.debugEvaluateHostileDespawn(input);
-    },
-    debugEvaluateAmbientDespawn: (input = {}) => {
-        if (typeof mobManager.debugEvaluateAmbientDespawn !== 'function') return null;
-        return mobManager.debugEvaluateAmbientDespawn(input);
-    },
+    performBetaSleepSpawning: (x, y, z, meta) => mobManager.performBetaSleepSpawning(x, y, z, meta),
     getBiomeAt: (x, z) => {
         const sx = Math.floor(Number(x));
         const sz = Math.floor(Number(z));

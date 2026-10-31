@@ -19,83 +19,46 @@ import {
 import { CHUNK_SIZE, WORLD_DEPTH, WORLD_HEIGHT } from './constants.js';
 import { isWaterId, isLavaId } from './fluidIds.js';
 import { FIRE_PLANE_HEIGHT, FIRE_PLANE_WIDTH } from './flatEntityRenderConfig.js';
+import {
+    BetaLightCache,
+    betaIdOfRuntime,
+    isBetaNormalCube,
+    isBetaLiquid,
+    isBetaWater,
+    appendBetaCollisionBoxes,
+    aabbIntersects,
+    findBetaPath,
+    BETA_GRASS_ID,
+    OVERWORLD_BRIGHTNESS,
+    NETHER_BRIGHTNESS
+} from './betaSpawnRules.js';
 
 const PIG_MAX_COUNT = 10;
-const PASSIVE_SPAWN_PERIOD_TICKS = 20;
-const WATER_SPAWN_PERIOD_TICKS = 20;
-const PIG_DESPAWN_DIST = 96;
-const CREATURE_MAX_NUMBER = 15; // Beta EnumCreatureType.creature maxNumberOfEntityType
-const WATER_CREATURE_MAX_NUMBER = 5; // Beta EnumCreatureType.waterCreature maxNumberOfEntityType
-const MONSTER_MAX_NUMBER = 70; // Beta EnumCreatureType.monster maxNumberOfEntityType
-const HOSTILE_SPAWN_PERIOD_TICKS = 1;
-const SPAWN_CHUNK_RADIUS = 8;   // Beta spawner uses 17x17 chunk area around player
 const MIN_PLAYER_SPAWN_DIST = 24;
-const SPAWN_TRIES_PIG = 2;
-const SPAWN_TRIES_CHICKEN = 3;
-const SPAWN_TRIES_SHEEP = 2;
-const SPAWN_TRIES_COW = 2;
-const SPAWN_TRIES_SQUID = 2;
-const SPAWN_TRIES_WOLF = 1;
-const SPAWN_TRIES_HOSTILE = 2;
-const SPAWN_GROUP_BOUNDS = {
-    pig: [4, 4],
-    chicken: [4, 4],
-    sheep: [4, 4],
-    cow: [4, 4],
-    wolf: [1, 4],
-    squid: [1, 4],
-    zombie: [1, 4],
-    skeleton: [1, 4],
-    creeper: [1, 4],
-    spider: [1, 4],
-    slime: [1, 4],
-    zombie_pigman: [1, 4],
-    ghast: [1, 1]
+// Beta 1.7.3 natural spawning (SpawnerAnimals, EnumCreatureType, BiomeGenBase spawn lists).
+const BETA_SPAWN_CHUNK_RADIUS = 8; // 17x17 chunks around the player
+const BETA_CREATURE_KINDS = ['monster', 'creature', 'water'];
+const BETA_KIND_CAPS = { monster: 70, creature: 15, water: 5 };
+const BETA_MONSTERS = [['spider', 10], ['zombie', 10], ['skeleton', 10], ['creeper', 10], ['slime', 10]];
+const BETA_CREATURES = [['sheep', 12], ['pig', 10], ['chicken', 10], ['cow', 8]];
+const BETA_FOREST_CREATURES = [...BETA_CREATURES, ['wolf', 2]]; // Forest and Taiga
+const BETA_WATER_CREATURES = [['squid', 10]];
+const BETA_HELL_MONSTERS = [['ghast', 10], ['zombie_pigman', 10]];
+const BETA_NIGHT_SPAWN_TYPES = ['spider', 'zombie', 'skeleton'];
+// Entity.setSize(width, height) per mob.
+const BETA_ENTITY_SIZE = {
+    pig: [0.9, 0.9], sheep: [0.9, 1.3], cow: [0.9, 1.3], chicken: [0.3, 0.4], wolf: [0.8, 0.8],
+    squid: [0.95, 0.95], creeper: [0.6, 1.8], zombie: [0.6, 1.8], skeleton: [0.6, 1.8],
+    spider: [1.4, 0.9], zombie_pigman: [0.6, 1.8], ghast: [4.0, 4.0], giant: [3.6, 10.8]
 };
-const PASSIVE_SPAWN_WEIGHTS = [
-    ['sheep', 12],
-    ['pig', 10],
-    ['chicken', 10],
-    ['cow', 8],
-    ['wolf', 2]
-];
-const PASSIVE_SPAWN_WEIGHTS_BY_BIOME = {
-    forest: [
-        ['sheep', 12], ['pig', 10], ['chicken', 10], ['cow', 8], ['wolf', 5]
-    ],
-    rainforest: [
-        ['sheep', 10], ['pig', 12], ['chicken', 10], ['cow', 8], ['wolf', 2]
-    ],
-    seasonal_forest: [
-        ['sheep', 12], ['pig', 10], ['chicken', 10], ['cow', 8], ['wolf', 3]
-    ],
-    taiga: [
-        ['sheep', 10], ['pig', 8], ['chicken', 8], ['cow', 8], ['wolf', 8]
-    ],
-    swampland: [
-        ['sheep', 8], ['pig', 10], ['chicken', 12], ['cow', 6], ['wolf', 1]
-    ],
-    plains: PASSIVE_SPAWN_WEIGHTS,
-    savanna: PASSIVE_SPAWN_WEIGHTS,
-    shrubland: PASSIVE_SPAWN_WEIGHTS,
-    desert: [
-        ['pig', 10], ['chicken', 10], ['cow', 8]
-    ],
-    tundra: [
-        ['sheep', 12], ['pig', 8], ['chicken', 8], ['cow', 8], ['wolf', 4]
-    ]
-};
-const OVERWORLD_HOSTILE_SPAWN_WEIGHTS = [
-    ['zombie', 100],
-    ['skeleton', 100],
-    ['creeper', 100],
-    ['spider', 100],
-    ['slime', 100]
-];
-const NETHER_HOSTILE_SPAWN_WEIGHTS = [
-    ['zombie_pigman', 100],
-    ['ghast', 50]
-];
+const BETA_ENTITY_MOB_TYPES = new Set(['creeper', 'zombie', 'spider', 'skeleton', 'zombie_pigman']);
+const BETA_NON_AGING_TYPES = new Set(['squid', 'slime', 'ghast']);
+// Spawner metadata holds WorldGenDungeons.pickMobSpawner + 1; 0 is TileEntityMobSpawner's default "Pig".
+const BETA_SPAWNER_MOB_BY_META = [null, 'skeleton', 'zombie', 'zombie', 'spider'];
+const BETA_BED_HEAD_OFFSETS = [[0, 1], [-1, 0], [0, -1], [1, 0]];
+const BETA_LIGHT_NEIGHBOURS = [[0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
+const BETA_SPIDER_MOUNTED_Y_OFFSET = 0.9 * 0.75 - 0.5; // EntitySpider.getMountedYOffset
+const MOB_SPAWNER_BLOCK_ID = 52;
 const PIG_SPEED = 1.0;
 const PIG_RADIUS = 0.45;
 const PIG_HEIGHT = 0.9;
@@ -353,6 +316,27 @@ const WOLF_FIRE_SURFACE_PARTS = [
     { cx: 0.16, cy: 0.2, cz: -0.22, hx: 0.08, hy: 0.18, hz: 0.08 }
 ];
 
+function randInt(n) {
+    return Math.floor(Math.random() * n);
+}
+
+function distSq3(ax, ay, az, bx, by, bz) {
+    const dx = ax - bx, dy = ay - by, dz = az - bz;
+    return dx * dx + dy * dy + dz * dz;
+}
+
+// SpawnerAnimals: weighted pick from a biome spawn list.
+function pickBetaSpawnEntry(list) {
+    let total = 0;
+    for (const [, w] of list) total += w;
+    let roll = randInt(total);
+    for (const [type, w] of list) {
+        roll -= w;
+        if (roll < 0) return type;
+    }
+    return list[0][0];
+}
+
 function clamp(v, min, max) {
     return v < min ? min : (v > max ? max : v);
 }
@@ -576,6 +560,16 @@ export class MobManager {
         this.damagePlayer = typeof options.damagePlayer === 'function' ? options.damagePlayer : null;
         this.addItemToInventory = typeof options.addItemToInventory === 'function' ? options.addItemToInventory : null;
         this.playBowSound = typeof options.playBowSound === 'function' ? options.playBowSound : null;
+        this.getSkylightSubtracted = typeof options.getSkylightSubtracted === 'function' ? options.getSkylightSubtracted : null;
+        this.getIsThundering = typeof options.getIsThundering === 'function' ? options.getIsThundering : null;
+        this.getDifficulty = typeof options.getDifficulty === 'function' ? options.getDifficulty : null;
+        this.getWorldSpawnPoint = typeof options.getWorldSpawnPoint === 'function' ? options.getWorldSpawnPoint : null;
+        this.betaLight = new BetaLightCache(chunkManager);
+        this.betaChunkCache = new Map();
+        this.betaBiomeCache = new Map();
+        this.betaSpawners = new Map();
+        this.betaSpawnerScan = new WeakMap();
+        this.betaTicksThisUpdate = 0;
         this.pigs = [];
         this.chickens = [];
         this.sheep = [];
@@ -594,9 +588,6 @@ export class MobManager {
         this.squids = [];
         this.wolves = [];
         this.spawnTickAccumulator = 0;
-        this.passiveSpawnCooldownTicks = 0;
-        this.waterSpawnCooldownTicks = 0;
-        this.hostileSpawnCooldownTicks = 0;
         this.tmpVec = new THREE.Vector3();
         this.tmpAxisY = new THREE.Vector3(0, 1, 0);
         this.tmpSurfaceNormal = new THREE.Vector3();
@@ -1063,9 +1054,10 @@ export class MobManager {
         }
         this.wolves.length = 0;
         this.spawnTickAccumulator = 0;
-        this.passiveSpawnCooldownTicks = 0;
-        this.waterSpawnCooldownTicks = 0;
-        this.hostileSpawnCooldownTicks = 0;
+        this.betaLight.clear();
+        this.betaChunkCache.clear();
+        this.betaBiomeCache.clear();
+        this.betaSpawners.clear();
         this.lastPlayerPos = null;
     }
 
@@ -1184,13 +1176,13 @@ export class MobManager {
 
     onEggImpact(x, y, z) {
         if (Math.random() >= 0.125) return;
+        // EntityEgg: Beta 1.7.3 has no baby mobs, so hatched chickens are adults.
         const hatchCount = Math.random() < 0.03125 ? 4 : 1;
         for (let i = 0; i < hatchCount; i++) {
             this.spawnChicken(
                 x + (Math.random() * 0.4 - 0.2),
                 y + 0.1,
-                z + (Math.random() * 0.4 - 0.2),
-                { isBaby: true, ageTicks: CHICKEN_BABY_AGE_TICKS }
+                z + (Math.random() * 0.4 - 0.2)
             );
         }
     }
@@ -3509,24 +3501,6 @@ export class MobManager {
         return null;
     }
 
-    findNaturalMonsterSpawnY(x, z) {
-        const bx = worldToBlock(x);
-        const bz = worldToBlock(z);
-        const minFloorY = WORLD_DEPTH + 1;
-        const maxFloorY = WORLD_HEIGHT - 3;
-        const attempts = 16;
-        const span = Math.max(1, maxFloorY - minFloorY + 1);
-        for (let i = 0; i < attempts; i++) {
-            const floorY = minFloorY + Math.floor(Math.random() * span);
-            const floorId = this.chunkManager.getBlock(bx, floorY, bz);
-            if (!isSolidBlock(floorId)) continue;
-            const a1 = this.chunkManager.getBlock(bx, floorY + 1, bz);
-            const a2 = this.chunkManager.getBlock(bx, floorY + 2, bz);
-            if (a1 === 0 && a2 === 0) return floorY + 0.5;
-        }
-        // Fallback keeps prior behavior if no random valid Y was found.
-        return this.findMonsterSpawnY(x, z);
-    }
 
     findPigmanSpawnY(x, z) {
         const bx = worldToBlock(x);
@@ -3748,86 +3722,6 @@ export class MobManager {
         this.spawnPig(x, y, z);
     }
 
-    getEligibleSpawnChunkColumns(playerPos) {
-        const pcx = Math.floor(playerPos.x / CHUNK_SIZE);
-        const pcz = Math.floor(playerPos.z / CHUNK_SIZE);
-        const cols = [];
-        const loadedColumns = new Set();
-        for (const chunk of this.chunkManager.chunks.values()) {
-            if (!chunk) continue;
-            const dx = chunk.cx - pcx;
-            const dz = chunk.cz - pcz;
-            if (Math.abs(dx) > SPAWN_CHUNK_RADIUS || Math.abs(dz) > SPAWN_CHUNK_RADIUS) continue;
-            loadedColumns.add(`${chunk.cx},${chunk.cz}`);
-        }
-        for (let dx = -SPAWN_CHUNK_RADIUS; dx <= SPAWN_CHUNK_RADIUS; dx++) {
-            for (let dz = -SPAWN_CHUNK_RADIUS; dz <= SPAWN_CHUNK_RADIUS; dz++) {
-                const cx = pcx + dx;
-                const cz = pcz + dz;
-                const border = (
-                    Math.abs(dx) === SPAWN_CHUNK_RADIUS ||
-                    Math.abs(dz) === SPAWN_CHUNK_RADIUS
-                );
-                cols.push({
-                    cx,
-                    cz,
-                    border,
-                    loaded: loadedColumns.has(`${cx},${cz}`)
-                });
-            }
-        }
-        return cols;
-    }
-
-    getCreatureCap(playerPos, eligibleCount = null) {
-        // Jacobo scales by eligible chunk set size around player (17x17 window),
-        // including border entries in the set-size calculation.
-        const eligible = Number.isFinite(eligibleCount)
-            ? Math.max(0, Math.floor(eligibleCount))
-            : this.getEligibleSpawnChunkColumns(playerPos).length;
-        const scaled = Math.floor((CREATURE_MAX_NUMBER * eligible) / 256);
-        return Math.max(0, scaled);
-    }
-
-    getWaterCreatureCap(playerPos, eligibleCount = null) {
-        const eligible = Number.isFinite(eligibleCount)
-            ? Math.max(0, Math.floor(eligibleCount))
-            : this.getEligibleSpawnChunkColumns(playerPos).length;
-        const scaled = Math.floor((WATER_CREATURE_MAX_NUMBER * eligible) / 256);
-        return Math.max(0, scaled);
-    }
-
-    getMonsterCap(playerPos, eligibleCount = null) {
-        const eligible = Number.isFinite(eligibleCount)
-            ? Math.max(0, Math.floor(eligibleCount))
-            : this.getEligibleSpawnChunkColumns(playerPos).length;
-        const scaled = Math.floor((MONSTER_MAX_NUMBER * eligible) / 256);
-        return Math.max(0, scaled);
-    }
-
-    getNaturalZombieCount() {
-        return this.zombies.filter((z) => z?.mobType !== 'giant').length;
-    }
-
-    pickWeightedSpawnType(weightedTable) {
-        if (!Array.isArray(weightedTable) || weightedTable.length === 0) return null;
-        let total = 0;
-        for (const entry of weightedTable) {
-            const w = Number(entry?.[1]);
-            if (Number.isFinite(w) && w > 0) total += w;
-        }
-        if (total <= 0) return null;
-        let roll = Math.random() * total;
-        for (const entry of weightedTable) {
-            const type = entry?.[0];
-            const w = Number(entry?.[1]);
-            if (!type || !Number.isFinite(w) || w <= 0) continue;
-            if (roll < w) return type;
-            roll -= w;
-        }
-        return weightedTable[weightedTable.length - 1]?.[0] || null;
-    }
-
     normalizeBiomeName(name) {
         return String(name || 'plains').toLowerCase().replace(/\s+/g, '_');
     }
@@ -3836,228 +3730,6 @@ export class MobManager {
         if (typeof this.getBiomeAt !== 'function') return 'plains';
         const biome = this.getBiomeAt(Math.floor(x), Math.floor(z));
         return this.normalizeBiomeName(biome);
-    }
-
-    getPassiveSpawnWeightsForBiome(biomeName) {
-        const b = this.normalizeBiomeName(biomeName);
-        return PASSIVE_SPAWN_WEIGHTS_BY_BIOME[b] || PASSIVE_SPAWN_WEIGHTS;
-    }
-
-    canNaturalSpawnTypeInBiome(type, biomeName) {
-        const biome = this.normalizeBiomeName(biomeName);
-        if (type === 'wolf') {
-            return biome === 'forest' || biome === 'taiga' || biome === 'seasonal_forest' || biome === 'tundra';
-        }
-        if (type === 'squid') return true;
-        if (type === 'pig' || type === 'chicken' || type === 'sheep' || type === 'cow') {
-            return biome !== 'hell';
-        }
-        return true;
-    }
-
-    trySpawnTypeAt(type, x, z, playerPos = null) {
-        const dim = this.getDimension ? this.getDimension() : 'OVERWORLD';
-        const biome = this.getBiomeAtWorldXZ(x, z);
-        const passesHostileNaturalLightCheck = (spawnY) => {
-            const light = this.getLightAt(x, spawnY + 1, z);
-            const threshold = Math.floor(Math.random() * 8); // Jacobo-like rand.nextInt(8)
-            return light <= threshold;
-        };
-        const isTooCloseToPlayer3D = (spawnY) => {
-            if (!playerPos) return false;
-            const dx = x - playerPos.x;
-            const dz = z - playerPos.z;
-            const py = Number.isFinite(playerPos.y) ? playerPos.y : spawnY;
-            const dy = spawnY - py;
-            const d2 = dx * dx + dz * dz + dy * dy;
-            return d2 < MIN_PLAYER_SPAWN_DIST * MIN_PLAYER_SPAWN_DIST;
-        };
-        const isOverworldPassive =
-            type === 'pig' ||
-            type === 'chicken' ||
-            type === 'sheep' ||
-            type === 'cow' ||
-            type === 'wolf' ||
-            type === 'squid';
-        if (isOverworldPassive && dim !== 'OVERWORLD') return false;
-        if (!this.canNaturalSpawnTypeInBiome(type, biome)) return false;
-        if (type === 'pig') {
-            const y = this.findSpawnY(x, z);
-            if (y == null) return false;
-            if (isTooCloseToPlayer3D(y)) return false;
-            if (this.getLightAt(x, y + 1, z) <= 8) return false;
-            if (this.entityIntersectsSolid(x, y, z, PIG_RADIUS, PIG_HEIGHT)) return false;
-            if (this.entityVolumeHasLiquid(x, y, z, PIG_RADIUS, PIG_HEIGHT)) return false;
-            this.spawnPig(x, y, z);
-            return true;
-        }
-        if (type === 'chicken') {
-            const y = this.findSpawnY(x, z);
-            if (y == null) return false;
-            if (isTooCloseToPlayer3D(y)) return false;
-            if (this.getLightAt(x, y + 1, z) <= 8) return false;
-            if (this.entityIntersectsSolid(x, y, z, CHICKEN_RADIUS, CHICKEN_HEIGHT)) return false;
-            if (this.entityVolumeHasLiquid(x, y, z, CHICKEN_RADIUS, CHICKEN_HEIGHT)) return false;
-            this.spawnChicken(x, y, z);
-            return true;
-        }
-        if (type === 'sheep') {
-            const y = this.findSpawnY(x, z);
-            if (y == null) return false;
-            if (isTooCloseToPlayer3D(y)) return false;
-            if (this.getLightAt(x, y + 1, z) <= 8) return false;
-            if (this.entityIntersectsSolid(x, y, z, SHEEP_RADIUS, SHEEP_HEIGHT)) return false;
-            if (this.entityVolumeHasLiquid(x, y, z, SHEEP_RADIUS, SHEEP_HEIGHT)) return false;
-            this.spawnSheep(x, y, z);
-            return true;
-        }
-        if (type === 'cow') {
-            const y = this.findSpawnY(x, z);
-            if (y == null) return false;
-            if (isTooCloseToPlayer3D(y)) return false;
-            if (this.getLightAt(x, y + 1, z) <= 8) return false;
-            if (this.entityIntersectsSolid(x, y, z, COW_RADIUS, COW_HEIGHT)) return false;
-            if (this.entityVolumeHasLiquid(x, y, z, COW_RADIUS, COW_HEIGHT)) return false;
-            this.spawnCow(x, y, z);
-            return true;
-        }
-        if (type === 'squid') {
-            const y = this.findWaterSpawnY(x, z);
-            if (y == null) return false;
-            if (isTooCloseToPlayer3D(y)) return false;
-            const by = worldToBlock(y);
-            if (by < 45 || by > 63) return false;
-            if (!isWaterId(this.chunkManager.getBlock(worldToBlock(x), by, worldToBlock(z)))) return false;
-            if (this.entityIntersectsSolid(x, y, z, SQUID_RADIUS, SQUID_HEIGHT)) return false;
-            if (!this.entitySampledVolumeIsWater(x, y, z, SQUID_RADIUS, SQUID_HEIGHT)) return false;
-            this.spawnSquid(x, y, z);
-            return true;
-        }
-        if (type === 'wolf') {
-            const y = this.findSpawnY(x, z);
-            if (y == null) return false;
-            if (isTooCloseToPlayer3D(y)) return false;
-            if (this.getLightAt(x, y + 1, z) <= 8) return false;
-            if (this.entityIntersectsSolid(x, y, z, WOLF_RADIUS, WOLF_HEIGHT)) return false;
-            if (this.entityVolumeHasLiquid(x, y, z, WOLF_RADIUS, WOLF_HEIGHT)) return false;
-            this.spawnWolf(x, y, z);
-            return true;
-        }
-        if (type === 'creeper') {
-            const sy = this.findNaturalMonsterSpawnY(x, z);
-            if (sy == null) return false;
-            if (playerPos) {
-                const dx = x - playerPos.x;
-                const dz = z - playerPos.z;
-                const dy = sy - (Number.isFinite(playerPos.y) ? playerPos.y : sy);
-                const d2 = dx * dx + dz * dz + dy * dy;
-                if (d2 < MIN_PLAYER_SPAWN_DIST * MIN_PLAYER_SPAWN_DIST) return false;
-            }
-            if (!passesHostileNaturalLightCheck(sy)) return false;
-            if (this.entityIntersectsSolid(x, sy, z, CREEPER_RADIUS, CREEPER_HEIGHT)) return false;
-            if (this.entityVolumeHasLiquid(x, sy, z, CREEPER_RADIUS, CREEPER_HEIGHT)) return false;
-            this.spawnCreeper(x, sy, z);
-            return true;
-        }
-        if (type === 'zombie') {
-            const sy = this.findNaturalMonsterSpawnY(x, z);
-            if (sy == null) return false;
-            if (playerPos) {
-                const dx = x - playerPos.x;
-                const dz = z - playerPos.z;
-                const dy = sy - (Number.isFinite(playerPos.y) ? playerPos.y : sy);
-                const d2 = dx * dx + dz * dz + dy * dy;
-                if (d2 < MIN_PLAYER_SPAWN_DIST * MIN_PLAYER_SPAWN_DIST) return false;
-            }
-            if (!passesHostileNaturalLightCheck(sy)) return false;
-            if (this.entityIntersectsSolid(x, sy, z, ZOMBIE_RADIUS, ZOMBIE_HEIGHT)) return false;
-            if (this.entityVolumeHasLiquid(x, sy, z, ZOMBIE_RADIUS, ZOMBIE_HEIGHT)) return false;
-            this.spawnZombie(x, sy, z);
-            return true;
-        }
-        if (type === 'spider') {
-            const sy = this.findNaturalMonsterSpawnY(x, z);
-            if (sy == null) return false;
-            if (playerPos) {
-                const dx = x - playerPos.x;
-                const dz = z - playerPos.z;
-                const dy = sy - (Number.isFinite(playerPos.y) ? playerPos.y : sy);
-                const d2 = dx * dx + dz * dz + dy * dy;
-                if (d2 < MIN_PLAYER_SPAWN_DIST * MIN_PLAYER_SPAWN_DIST) return false;
-            }
-            if (!passesHostileNaturalLightCheck(sy)) return false;
-            if (this.entityIntersectsSolid(x, sy, z, SPIDER_RADIUS, SPIDER_HEIGHT)) return false;
-            if (this.entityVolumeHasLiquid(x, sy, z, SPIDER_RADIUS, SPIDER_HEIGHT)) return false;
-            this.spawnSpider(x, sy, z);
-            return true;
-        }
-        if (type === 'skeleton') {
-            const sy = this.findNaturalMonsterSpawnY(x, z);
-            if (sy == null) return false;
-            if (playerPos) {
-                const dx = x - playerPos.x;
-                const dz = z - playerPos.z;
-                const dy = sy - (Number.isFinite(playerPos.y) ? playerPos.y : sy);
-                const d2 = dx * dx + dz * dz + dy * dy;
-                if (d2 < MIN_PLAYER_SPAWN_DIST * MIN_PLAYER_SPAWN_DIST) return false;
-            }
-            if (!passesHostileNaturalLightCheck(sy)) return false;
-            if (this.entityIntersectsSolid(x, sy, z, SKELETON_RADIUS, SKELETON_HEIGHT)) return false;
-            if (this.entityVolumeHasLiquid(x, sy, z, SKELETON_RADIUS, SKELETON_HEIGHT)) return false;
-            this.spawnSkeleton(x, sy, z);
-            return true;
-        }
-        if (type === 'slime') {
-            if (this.getDimension && this.getDimension() !== 'OVERWORLD') return false;
-            const sy = this.findNaturalMonsterSpawnY(x, z);
-            if (sy == null) return false;
-            if (playerPos) {
-                const dx = x - playerPos.x;
-                const dz = z - playerPos.z;
-                const dy = sy - (Number.isFinite(playerPos.y) ? playerPos.y : sy);
-                const d2 = dx * dx + dz * dz + dy * dy;
-                if (d2 < MIN_PLAYER_SPAWN_DIST * MIN_PLAYER_SPAWN_DIST) return false;
-            }
-            if (sy > 40) return false;
-            const cx = Math.floor(x / CHUNK_SIZE);
-            const cz = Math.floor(z / CHUNK_SIZE);
-            if (this.isSlimeChunk && !this.isSlimeChunk(cx, cz)) return false;
-            const sizeRoll = Math.random();
-            const size = sizeRoll < 0.12 ? 4 : (sizeRoll < 0.42 ? 2 : 1);
-            const radius = this.getSlimeRadiusForSize(size);
-            const height = this.getSlimeHeightForSize(size);
-            if (this.entityIntersectsSolid(x, sy, z, radius, height)) return false;
-            if (this.entityVolumeHasLiquid(x, sy, z, radius, height)) return false;
-            this.spawnSlime(x, sy, z, size);
-            return true;
-        }
-        if (type === 'ghast') {
-            if (this.getDimension && this.getDimension() !== 'NETHER') return false;
-            if (Math.floor(Math.random() * 20) !== 0) return false;
-            const sy = Math.floor((WORLD_DEPTH + 4) + Math.random() * Math.max(1, (WORLD_HEIGHT - WORLD_DEPTH - 8)));
-            if (!this.canSpawnGhastAt(x, sy, z, playerPos)) return false;
-            this.spawnGhast(x, sy, z);
-            return true;
-        }
-        if (type === 'zombie_pigman') {
-            if (this.getDimension && this.getDimension() !== 'NETHER') return false;
-            const sy = this.findPigmanSpawnY(x, z);
-            if (sy == null) return false;
-            if (playerPos) {
-                const dx = x - playerPos.x;
-                const dz = z - playerPos.z;
-                const dy = sy - (Number.isFinite(playerPos.y) ? playerPos.y : sy);
-                const d2 = dx * dx + dz * dz + dy * dy;
-                if (d2 < MIN_PLAYER_SPAWN_DIST * MIN_PLAYER_SPAWN_DIST) return false;
-            }
-            const supportId = this.chunkManager.getBlock(x, sy - 1, z);
-            if (!(isNetherrackId(supportId) || supportId === 88)) return false; // Netherrack / Soul Sand support
-            if (this.entityIntersectsSolid(x, sy, z, ZOMBIE_PIGMAN_RADIUS, ZOMBIE_PIGMAN_HEIGHT)) return false;
-            if (this.entityVolumeHasLiquid(x, sy, z, ZOMBIE_PIGMAN_RADIUS, ZOMBIE_PIGMAN_HEIGHT)) return false;
-            this.spawnZombiePigman(x, sy, z);
-            return true;
-        }
-        return false;
     }
 
     entityVolumeHasLiquid(x, y, z, radius, height) {
@@ -4107,193 +3779,612 @@ export class MobManager {
         return true;
     }
 
-    trySpawnGroupInChunk(type, cx, cz, playerPos, maxToSpawn = Infinity) {
-        const baseX = cx * CHUNK_SIZE + Math.floor(Math.random() * CHUNK_SIZE);
-        const baseZ = cz * CHUNK_SIZE + Math.floor(Math.random() * CHUNK_SIZE);
-        const bounds = SPAWN_GROUP_BOUNDS[type] || [1, 4];
-        const minGroup = Math.max(1, Math.floor(bounds[0]));
-        const maxGroup = Math.max(minGroup, Math.floor(bounds[1]));
-        const targetGroupCount = minGroup + Math.floor(Math.random() * (maxGroup - minGroup + 1));
-        const packAttempts = type === 'slime'
-            ? 1
-            : (type === 'zombie_pigman' || type === 'ghast' ? 1 : 3); // pigman/ghast groups are kept tight to Jacobo-like small packs
-        const localAttempts = type === 'slime'
-            ? 1
-            : (type === 'ghast' ? 2 : (type === 'zombie_pigman' ? 4 : 4));
-        let spawned = 0;
-        const capLocal = Number.isFinite(maxToSpawn) ? Math.max(0, Math.floor(maxToSpawn)) : Infinity;
-        if (capLocal <= 0) return 0;
-        const spawnGoal = Math.max(1, Math.min(capLocal, targetGroupCount));
-        for (let pack = 0; pack < packAttempts; pack++) {
-            if (spawned >= spawnGoal) break;
-            let ox = baseX;
-            let oz = baseZ;
-            const attemptsBudget = Math.max(localAttempts, spawnGoal * 2);
-            for (let i = 0; i < attemptsBudget; i++) {
-                if (spawned >= spawnGoal) break;
-                ox += Math.floor(Math.random() * 6) - Math.floor(Math.random() * 6);
-                oz += Math.floor(Math.random() * 6) - Math.floor(Math.random() * 6);
-                if (this.trySpawnTypeAt(type, ox, oz, playerPos)) {
-                    spawned++;
+    // ---- Beta 1.7.3 natural spawning (SpawnerAnimals.performSpawning) ----
+    // Positions inside this section are Beta coordinates (MindBlock position + 0.5).
+
+    getBetaChunk(cx, cy, cz) {
+        const key = ((cx + 32768) * 65536 + (cz + 32768)) * 8 + cy;
+        let chunk = this.betaChunkCache.get(key);
+        if (chunk === undefined) {
+            chunk = this.chunkManager.getChunk(cx, cy, cz) || null;
+            this.betaChunkCache.set(key, chunk);
+        }
+        return chunk;
+    }
+
+    // Beta block id; 0 outside the world's height, -1 when that chunk slice isn't loaded here.
+    betaBlockAt(x, y, z) {
+        if (y < 0 || y >= 128) return 0;
+        const chunk = this.getBetaChunk(Math.floor(x / CHUNK_SIZE), y >> 4, Math.floor(z / CHUNK_SIZE));
+        if (!chunk) return -1;
+        return betaIdOfRuntime(chunk.data[(x & 15) + ((y & 15) << 4) + ((z & 15) << 8)]);
+    }
+
+    betaMetaAt(x, y, z) {
+        if (y < 0 || y >= 128) return 0;
+        const chunk = this.getBetaChunk(Math.floor(x / CHUNK_SIZE), y >> 4, Math.floor(z / CHUNK_SIZE));
+        return chunk ? chunk.metadata[(x & 15) + ((y & 15) << 4) + ((z & 15) << 8)] : 0;
+    }
+
+    isBetaNormalCubeAt(x, y, z) {
+        const id = this.betaBlockAt(x, y, z);
+        return id < 0 || isBetaNormalCube(id);
+    }
+
+    // SpawnerAnimals.canCreatureTypeSpawnAtLocation
+    canBetaCreatureTypeSpawnAt(kind, x, y, z) {
+        const here = this.betaBlockAt(x, y, z);
+        const above = this.betaBlockAt(x, y + 1, z);
+        if (here < 0 || above < 0) return false;
+        if (kind === 'water') return isBetaLiquid(here) && !isBetaNormalCube(above);
+        const below = this.betaBlockAt(x, y - 1, z);
+        if (below < 0) return false;
+        return isBetaNormalCube(below) && !isBetaNormalCube(here) && !isBetaLiquid(here) && !isBetaNormalCube(above);
+    }
+
+    getBetaSkylightSubtracted() {
+        const v = this.getSkylightSubtracted ? Number(this.getSkylightSubtracted()) : 0;
+        return Number.isFinite(v) ? v : 0;
+    }
+
+    getBetaDifficulty() {
+        const v = this.getDifficulty ? Number(this.getDifficulty()) : 2;
+        return Number.isFinite(v) ? v : 2;
+    }
+
+    // World.getSavedLightValue(EnumSkyBlock.Sky); -1 while the column's light isn't computed.
+    betaSkyLight(x, y, z) {
+        const packed = this.betaLight.getPacked(x, Math.max(0, Math.min(127, y)), z);
+        return packed < 0 ? -1 : packed >> 4;
+    }
+
+    // World.getBlockLightValue_do
+    betaBlockLightValue(x, y, z, sub, neighbours = true) {
+        if (neighbours) {
+            const id = this.betaBlockAt(x, y, z);
+            if (id === 44 || id === 60 || id === 67 || id === 53) {
+                let best = 0;
+                for (const [dx, dy, dz] of BETA_LIGHT_NEIGHBOURS) {
+                    const v = this.betaBlockLightValue(x + dx, y + dy, z + dz, sub, false);
+                    if (v < 0) return -1;
+                    if (v > best) best = v;
+                }
+                return best;
+            }
+        }
+        if (y < 0) return 0;
+        if (y >= 128) return Math.max(0, 15 - sub);
+        const packed = this.betaLight.getPacked(x, y, z);
+        if (packed < 0) return -1;
+        return Math.max((packed >> 4) - sub, packed & 15);
+    }
+
+    // World.getFullBlockLightValue (ignores time of day)
+    betaFullBlockLight(x, y, z) {
+        if (y < 0) return 0;
+        const packed = this.betaLight.getPacked(x, Math.min(127, y), z);
+        return packed < 0 ? -1 : Math.max(packed >> 4, packed & 15);
+    }
+
+    betaBrightness(lightValue) {
+        const table = (this.getDimension && this.getDimension() === 'NETHER') ? NETHER_BRIGHTNESS : OVERWORLD_BRIGHTNESS;
+        return table[Math.max(0, Math.min(15, lightValue))];
+    }
+
+    // Entity.getEntityBrightness
+    getBetaEntityBrightness(entity, type) {
+        const [, h] = this.getBetaEntitySize(type, entity);
+        const x = Math.floor(entity.pos.x + 0.5);
+        const y = Math.floor(entity.pos.y + 0.5 + h * 0.66);
+        const z = Math.floor(entity.pos.z + 0.5);
+        const lv = this.betaBlockLightValue(x, y, z, this.getBetaSkylightSubtracted());
+        return lv < 0 ? 0 : this.betaBrightness(lv);
+    }
+
+    getBetaEntitySize(type, entity = null) {
+        if (type === 'slime') {
+            const s = entity ? (entity.size || 1) : 1;
+            return [0.6 * s, 0.6 * s];
+        }
+        if (type === 'zombie' && entity && entity.mobType === 'giant') return BETA_ENTITY_SIZE.giant;
+        return BETA_ENTITY_SIZE[type] || [0.6, 1.8];
+    }
+
+    getBetaMobGroups() {
+        return [
+            [this.pigs, 'pig'], [this.chickens, 'chicken'], [this.sheep, 'sheep'], [this.cows, 'cow'],
+            [this.wolves, 'wolf'], [this.squids, 'squid'], [this.creepers, 'creeper'], [this.zombies, 'zombie'],
+            [this.spiders, 'spider'], [this.skeletons, 'skeleton'], [this.slimes, 'slime'], [this.ghasts, 'ghast'],
+            [this.zombiePigmen, 'zombie_pigman']
+        ];
+    }
+
+    getBetaListForType(type) {
+        switch (type) {
+            case 'pig': return this.pigs;
+            case 'chicken': return this.chickens;
+            case 'sheep': return this.sheep;
+            case 'cow': return this.cows;
+            case 'wolf': return this.wolves;
+            case 'squid': return this.squids;
+            case 'creeper': return this.creepers;
+            case 'zombie': return this.zombies;
+            case 'spider': return this.spiders;
+            case 'skeleton': return this.skeletons;
+            case 'slime': return this.slimes;
+            case 'ghast': return this.ghasts;
+            case 'zombie_pigman': return this.zombiePigmen;
+            default: return null;
+        }
+    }
+
+    getBetaEntityBox(type, entity) {
+        const [w, h] = this.getBetaEntitySize(type, entity);
+        const x = entity.pos.x + 0.5, y = entity.pos.y + 0.5, z = entity.pos.z + 0.5;
+        return [x - w / 2, y, z - w / 2, x + w / 2, y + h, z + w / 2];
+    }
+
+    // Beta player eye position (posY includes the 1.62 yOffset). The camera sits 1.5 above the feet.
+    toBetaPlayerPos(playerPos) {
+        return { x: playerPos.x + 0.5, y: playerPos.y + 0.62, z: playerPos.z + 0.5 };
+    }
+
+    // World.checkIfAABBIsClear
+    isBetaBoxClearOfEntities(box) {
+        for (const [list, type] of this.getBetaMobGroups()) {
+            for (const e of list) {
+                if (e && aabbIntersects(box, this.getBetaEntityBox(type, e))) return false;
+            }
+        }
+        const p = this.lastPlayerPos;
+        if (p) {
+            const feet = p.y - 1.0;
+            const px = p.x + 0.5, pz = p.z + 0.5;
+            if (aabbIntersects(box, [px - 0.3, feet, pz - 0.3, px + 0.3, feet + 1.8, pz + 0.3])) return false;
+        }
+        return true;
+    }
+
+    // World.getCollidingBoundingBoxes (block part); unloaded blocks count as blocking.
+    betaBoxHitsBlocks(box) {
+        const x0 = Math.floor(box[0]), x1 = Math.floor(box[3] + 1);
+        const y0 = Math.floor(box[1]) - 1, y1 = Math.floor(box[4] + 1);
+        const z0 = Math.floor(box[2]), z1 = Math.floor(box[5] + 1);
+        const boxes = [];
+        for (let x = x0; x < x1; x++) {
+            for (let z = z0; z < z1; z++) {
+                for (let y = y0; y < y1; y++) {
+                    const id = this.betaBlockAt(x, y, z);
+                    if (id < 0) return true;
+                    if (id === 0) continue;
+                    boxes.length = 0;
+                    appendBetaCollisionBoxes(id, this.betaMetaAt(x, y, z), x, y, z, boxes);
+                    for (const b of boxes) {
+                        if (aabbIntersects(box, b)) return true;
+                    }
                 }
             }
         }
-        return spawned;
+        return false;
+    }
+
+    // World.getIsAnyLiquid
+    betaBoxHasLiquid(box) {
+        let x0 = Math.floor(box[0]), y0 = Math.floor(box[1]), z0 = Math.floor(box[2]);
+        const x1 = Math.floor(box[3] + 1), y1 = Math.floor(box[4] + 1), z1 = Math.floor(box[5] + 1);
+        if (box[0] < 0) x0--;
+        if (box[1] < 0) y0--;
+        if (box[2] < 0) z0--;
+        for (let x = x0; x < x1; x++) {
+            for (let y = y0; y < y1; y++) {
+                for (let z = z0; z < z1; z++) {
+                    if (isBetaLiquid(this.betaBlockAt(x, y, z))) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // getCanSpawnHere for each mob class, at Beta position (x, y, z).
+    canBetaEntitySpawnHere(type, x, y, z, size = 1) {
+        const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
+        const [w, h] = type === 'slime' ? [0.6 * size, 0.6 * size] : this.getBetaEntitySize(type);
+        const box = [x - w / 2, y, z - w / 2, x + w / 2, y + h, z + w / 2];
+        const difficulty = this.getBetaDifficulty();
+        // EntityLiving.getCanSpawnHere
+        const livingOk = () => this.isBetaBoxClearOfEntities(box) && !this.betaBoxHitsBlocks(box) && !this.betaBoxHasLiquid(box);
+        switch (type) {
+            case 'squid':
+                return this.isBetaBoxClearOfEntities(box);
+            case 'slime': {
+                const slimeChunk = this.isSlimeChunk ? !!this.isSlimeChunk(Math.floor(bx / CHUNK_SIZE), Math.floor(bz / CHUNK_SIZE)) : false;
+                return (size === 1 || difficulty > 0) && randInt(10) === 0 && slimeChunk && y < 16;
+            }
+            case 'ghast':
+                return randInt(20) === 0 && livingOk() && difficulty > 0;
+            case 'zombie_pigman':
+                return difficulty > 0 && livingOk();
+            case 'pig': case 'sheep': case 'cow': case 'chicken': case 'wolf':
+                // EntityAnimal: grass below, full light > 8; path weight on grass is always 10.
+                if (this.betaBlockAt(bx, by - 1, bz) !== BETA_GRASS_ID) return false;
+                if (this.betaFullBlockLight(bx, by, bz) <= 8) return false;
+                return livingOk();
+            default: {
+                // EntityMob (zombie, skeleton, creeper, spider)
+                const sky = this.betaSkyLight(bx, by, bz);
+                if (sky < 0 || sky > randInt(32)) return false;
+                const sub = this.getBetaSkylightSubtracted();
+                const lv = this.betaBlockLightValue(bx, by, bz, (this.getIsThundering && this.getIsThundering()) ? 10 : sub);
+                if (lv < 0 || lv > randInt(8)) return false;
+                if (!livingOk()) return false;
+                // EntityCreature: getBlockPathWeight = 0.5 - brightness >= 0
+                return 0.5 - this.betaBrightness(this.betaBlockLightValue(bx, by, bz, sub)) >= 0;
+            }
+        }
+    }
+
+    // Creates the mob at a Beta position and returns it.
+    spawnBetaEntity(type, x, y, z, size = 1) {
+        const mx = x - 0.5, my = y - 0.5, mz = z - 0.5;
+        switch (type) {
+            case 'pig': this.spawnPig(mx, my, mz); break;
+            case 'chicken': this.spawnChicken(mx, my, mz); break;
+            case 'sheep': this.spawnSheep(mx, my, mz); break;
+            case 'cow': this.spawnCow(mx, my, mz); break;
+            case 'wolf': this.spawnWolf(mx, my, mz); break;
+            case 'squid': this.spawnSquid(mx, my, mz); break;
+            case 'creeper': this.spawnCreeper(mx, my, mz); break;
+            case 'zombie': this.spawnZombie(mx, my, mz); break;
+            case 'spider': this.spawnSpider(mx, my, mz); break;
+            case 'skeleton': this.spawnSkeleton(mx, my, mz); break;
+            case 'slime': this.spawnSlime(mx, my, mz, size); break;
+            case 'ghast': this.spawnGhast(mx, my, mz); break;
+            case 'zombie_pigman': this.spawnZombiePigman(mx, my, mz); break;
+            default: return null;
+        }
+        const list = this.getBetaListForType(type);
+        const ent = list && list.length ? list[list.length - 1] : null;
+        if (ent) {
+            ent._despawnAgeTicks = 0;
+            ent._betaLastHealth = Number(ent.health);
+        }
+        return ent;
+    }
+
+    // SpawnerAnimals.creatureSpecificInit (sheep colour is already randomised by spawnSheep).
+    betaCreatureSpecificInit(type, ent, x, y, z) {
+        if (type === 'spider' && randInt(100) === 0) {
+            const rider = this.spawnBetaEntity('skeleton', x, y, z);
+            if (rider) {
+                rider.yaw = ent.yaw;
+                rider.ridingEntity = ent;
+                ent.riddenByEntity = rider;
+            }
+        }
+    }
+
+    // Keeps a spider jockey's skeleton on its spider (Entity.updateRidden).
+    updateBetaRider(rider) {
+        const mount = rider.ridingEntity;
+        if (!mount) return;
+        if (mount._dead || mount._forceDespawn || !this.spiders.includes(mount)) {
+            rider.ridingEntity = null;
+            if (mount.riddenByEntity === rider) mount.riddenByEntity = null;
+            return;
+        }
+        rider.pos.set(mount.pos.x, mount.pos.y + BETA_SPIDER_MOUNTED_Y_OFFSET, mount.pos.z);
+        if (rider.vel) rider.vel.set(0, 0, 0);
+    }
+
+    countBetaKind(kind) {
+        if (kind === 'monster') {
+            return this.creepers.length + this.zombies.length + this.spiders.length + this.skeletons.length +
+                this.slimes.length + this.ghasts.length + this.zombiePigmen.length;
+        }
+        if (kind === 'creature') return this.pigs.length + this.chickens.length + this.sheep.length + this.cows.length + this.wolves.length;
+        return this.squids.length;
+    }
+
+    getBetaChunkBiome(cx, cz) {
+        const dim = this.getDimension ? this.getDimension() : 'OVERWORLD';
+        const key = `${dim}:${cx},${cz}`;
+        let biome = this.betaBiomeCache.get(key);
+        if (biome === undefined) {
+            // WorldChunkManager.getBiomeGenAtChunkCoord samples the chunk's corner block.
+            biome = this.getBiomeAtWorldXZ(cx * CHUNK_SIZE, cz * CHUNK_SIZE);
+            this.betaBiomeCache.set(key, biome);
+        }
+        return biome;
+    }
+
+    // BiomeGenBase.getSpawnableList
+    getBetaSpawnList(kind, biome) {
+        if (biome === 'hell') return kind === 'monster' ? BETA_HELL_MONSTERS : null;
+        if (kind === 'monster') return BETA_MONSTERS;
+        if (kind === 'water') return BETA_WATER_CREATURES;
+        return (biome === 'forest' || biome === 'taiga') ? BETA_FOREST_CREATURES : BETA_CREATURES;
+    }
+
+    performBetaSpawning(playerPos) {
+        const player = this.toBetaPlayerPos(playerPos);
+        const pcx = Math.floor(player.x / CHUNK_SIZE);
+        const pcz = Math.floor(player.z / CHUNK_SIZE);
+        const radius = BETA_SPAWN_CHUNK_RADIUS;
+        const eligibleCount = (radius * 2 + 1) * (radius * 2 + 1);
+        const spawn = this.getWorldSpawnPoint ? this.getWorldSpawnPoint() : null;
+        this.betaLight.pruneOutside(pcx - radius - 1, pcx + radius + 1, pcz - radius - 1, pcz + radius + 1);
+
+        for (const kind of BETA_CREATURE_KINDS) {
+            if (this.countBetaKind(kind) > Math.floor(BETA_KIND_CAPS[kind] * eligibleCount / 256)) continue;
+            for (let dx = -radius; dx <= radius; dx++) {
+                for (let dz = -radius; dz <= radius; dz++) {
+                    const cx = pcx + dx, cz = pcz + dz;
+                    const list = this.getBetaSpawnList(kind, this.getBetaChunkBiome(cx, cz));
+                    if (!list || list.length === 0) continue;
+                    const type = pickBetaSpawnEntry(list);
+                    const x = cx * CHUNK_SIZE + randInt(16);
+                    const y = randInt(128);
+                    const z = cz * CHUNK_SIZE + randInt(16);
+                    const origin = this.betaBlockAt(x, y, z);
+                    if (origin < 0 || isBetaNormalCube(origin)) continue;
+                    if (kind === 'water' ? !isBetaWater(origin) : origin !== 0) continue;
+                    this.spawnBetaPack(kind, type, x, y, z, player, spawn);
+                }
+            }
+        }
+    }
+
+    // Three packs of four random-walk steps around the origin; Y never changes.
+    spawnBetaPack(kind, type, x, y, z, player, spawn) {
+        const maxInChunk = type === 'wolf' ? 8 : (type === 'ghast' ? 1 : 4);
+        let spawned = 0;
+        for (let pack = 0; pack < 3; pack++) {
+            let px = x, pz = z;
+            for (let step = 0; step < 4; step++) {
+                px += randInt(6) - randInt(6);
+                pz += randInt(6) - randInt(6);
+                if (!this.canBetaCreatureTypeSpawnAt(kind, px, y, pz)) continue;
+                const fx = px + 0.5, fy = y, fz = pz + 0.5;
+                if (distSq3(player.x, player.y, player.z, fx, fy, fz) < 576) continue;
+                if (spawn && distSq3(spawn.x, spawn.y, spawn.z, fx, fy, fz) < 576) continue;
+                const size = type === 'slime' ? (1 << randInt(3)) : 1;
+                if (!this.canBetaEntitySpawnHere(type, fx, fy, fz, size)) continue;
+                const ent = this.spawnBetaEntity(type, fx, fy, fz, size);
+                if (!ent) continue;
+                spawned++;
+                this.betaCreatureSpecificInit(type, ent, fx, fy, fz);
+                if (spawned >= maxInChunk) return;
+            }
+        }
+    }
+
+    // SpawnerAnimals.performSleepSpawning for a player asleep in the bed whose head block is
+    // (x, y, z) with bed metadata `meta`. Returns true when a monster woke the player.
+    performBetaSleepSpawning(x, y, z, meta) {
+        this.betaChunkCache.clear();
+        const dir = meta & 3;
+        let ox = 0.5, oz = 0.5;
+        if (dir === 0) oz = 0.9;
+        else if (dir === 1) ox = 0.1;
+        else if (dir === 2) oz = 0.1;
+        else ox = 0.9;
+        // EntityPlayer.sleepInBedAt: size 0.2, yOffset 0.2.
+        const player = { x: x + ox, y: y + 0.9375, z: z + oz, minY: y + 0.9375 - 0.2 };
+        // Light for the area around the bed is needed right now.
+        const pcx = Math.floor(player.x / CHUNK_SIZE), pcz = Math.floor(player.z / CHUNK_SIZE);
+        for (let dx = -3; dx <= 3; dx++) {
+            for (let dz = -3; dz <= 3; dz++) {
+                if (!this.betaLight.getColumn(pcx + dx, pcz + dz) && this.chunkManager.hasChunk(pcx + dx, 7, pcz + dz)) {
+                    this.betaLight.computeColumn(pcx + dx, pcz + dz);
+                }
+            }
+        }
+        const pathWorld = {
+            betaId: (bx, by, bz) => { const id = this.betaBlockAt(bx, by, bz); return id < 0 ? 1 : id; },
+            meta: (bx, by, bz) => this.betaMetaAt(bx, by, bz)
+        };
+        for (let attempt = 0; attempt < 20; attempt++) {
+            const sx = Math.floor(player.x) + randInt(32) - randInt(32);
+            const sz = Math.floor(player.z) + randInt(32) - randInt(32);
+            let startY = Math.floor(player.y) + randInt(16) - randInt(16);
+            if (startY < 1) startY = 1;
+            else if (startY > 128) startY = 128;
+            const type = BETA_NIGHT_SPAWN_TYPES[randInt(BETA_NIGHT_SPAWN_TYPES.length)];
+            let sy = startY;
+            while (sy > 2 && !this.isBetaNormalCubeAt(sx, sy - 1, sz)) sy--;
+            while (!this.canBetaCreatureTypeSpawnAt('monster', sx, sy, sz) && sy < startY + 16 && sy < 128) sy++;
+            if (!(sy < startY + 16 && sy < 128)) continue;
+            const fx = sx + 0.5, fz = sz + 0.5;
+            if (!this.canBetaEntitySpawnHere(type, fx, sy, fz)) continue;
+            const [w, h] = this.getBetaEntitySize(type);
+            const path = findBetaPath(pathWorld, { minX: fx - w / 2, minY: sy, minZ: fz - w / 2, width: w, height: h }, player.x, player.minY, player.z, 32);
+            if (!path || path.length <= 1) continue;
+            const last = path[path.length - 1];
+            if (Math.abs(last.x - player.x) >= 1.5 || Math.abs(last.z - player.z) >= 1.5 || Math.abs(last.y - player.y) >= 1.5) continue;
+            const spot = this.getBetaBedEscapeSpot(Math.floor(player.x), Math.floor(player.y), Math.floor(player.z), dir, 1)
+                || { x: sx, y: sy + 1, z: sz };
+            const ent = this.spawnBetaEntity(type, spot.x + 0.5, spot.y, spot.z + 0.5);
+            if (ent) this.betaCreatureSpecificInit(type, ent, spot.x + 0.5, spot.y, spot.z + 0.5);
+            return true;
+        }
+        return false;
+    }
+
+    // BlockBed.getNearestEmptyChunkCoordinates
+    getBetaBedEscapeSpot(x, y, z, dir, skip) {
+        const [hx, hz] = BETA_BED_HEAD_OFFSETS[dir];
+        for (let i = 0; i <= 1; i++) {
+            const x0 = x - hx * i - 1;
+            const z0 = z - hz * i - 1;
+            for (let ix = x0; ix <= x0 + 2; ix++) {
+                for (let iz = z0; iz <= z0 + 2; iz++) {
+                    const below = this.betaBlockAt(ix, y - 1, iz);
+                    if (below >= 0 && isBetaNormalCube(below) && this.betaBlockAt(ix, y, iz) === 0 && this.betaBlockAt(ix, y + 1, iz) === 0) {
+                        if (skip <= 0) return { x: ix, y, z: iz };
+                        skip--;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    // TileEntityMobSpawner.updateEntity for every spawner near the player.
+    updateBetaMobSpawners(playerPos) {
+        const player = this.toBetaPlayerPos(playerPos);
+        const x0 = Math.floor((player.x - 17) / CHUNK_SIZE), x1 = Math.floor((player.x + 17) / CHUNK_SIZE);
+        const z0 = Math.floor((player.z - 17) / CHUNK_SIZE), z1 = Math.floor((player.z + 17) / CHUNK_SIZE);
+        const y0 = Math.max(0, Math.floor((player.y - 17) / CHUNK_SIZE)), y1 = Math.min(7, Math.floor((player.y + 17) / CHUNK_SIZE));
+        for (let cx = x0; cx <= x1; cx++) {
+            for (let cz = z0; cz <= z1; cz++) {
+                for (let cy = y0; cy <= y1; cy++) {
+                    const chunk = this.getBetaChunk(cx, cy, cz);
+                    if (!chunk) continue;
+                    for (const idx of this.getBetaSpawnerIndices(chunk, cx, cz)) {
+                        const x = cx * CHUNK_SIZE + (idx & 15);
+                        const y = cy * CHUNK_SIZE + ((idx >> 4) & 15);
+                        const z = cz * CHUNK_SIZE + (idx >> 8);
+                        this.tickBetaMobSpawner(x, y, z, player);
+                    }
+                }
+            }
+        }
+    }
+
+    getBetaSpawnerIndices(chunk, cx, cz) {
+        const rev = this.chunkManager.getColumnRevision ? this.chunkManager.getColumnRevision(cx, cz) : 0;
+        let cached = this.betaSpawnerScan.get(chunk);
+        if (!cached || cached.rev !== rev) {
+            const list = [];
+            const data = chunk.data;
+            for (let i = 0; i < data.length; i++) {
+                if (data[i] === MOB_SPAWNER_BLOCK_ID) list.push(i);
+            }
+            cached = { rev, list };
+            this.betaSpawnerScan.set(chunk, cached);
+        }
+        return cached.list;
+    }
+
+    tickBetaMobSpawner(x, y, z, player) {
+        if (distSq3(player.x, player.y, player.z, x + 0.5, y + 0.5, z + 0.5) >= 256) return;
+        const key = `${x},${y},${z}`;
+        let state = this.betaSpawners.get(key);
+        if (!state) {
+            state = { delay: 20 };
+            this.betaSpawners.set(key, state);
+        }
+        if (state.delay === -1) state.delay = 200 + randInt(600);
+        if (state.delay > 0) {
+            state.delay--;
+            return;
+        }
+        const type = BETA_SPAWNER_MOB_BY_META[this.betaMetaAt(x, y, z)] || 'pig';
+        const near = [x - 8, y - 4, z - 8, x + 9, y + 5, z + 9];
+        for (let i = 0; i < 4; i++) {
+            if (this.countBetaSpawnerKin(type, near) >= 6) {
+                state.delay = 200 + randInt(600);
+                return;
+            }
+            const ex = x + (Math.random() - Math.random()) * 4;
+            const ey = y + randInt(3) - 1;
+            const ez = z + (Math.random() - Math.random()) * 4;
+            if (this.canBetaEntitySpawnHere(type, ex, ey, ez)) {
+                this.spawnBetaEntity(type, ex, ey, ez);
+                state.delay = 200 + randInt(600);
+            }
+        }
+    }
+
+    // World.getEntitiesWithinAABB(entity class) — EntityPigZombie is a subclass of EntityZombie.
+    countBetaSpawnerKin(type, box) {
+        let count = 0;
+        const groups = type === 'zombie' ? [[this.zombies, 'zombie'], [this.zombiePigmen, 'zombie_pigman']] : [[this.getBetaListForType(type) || [], type]];
+        for (const [list, t] of groups) {
+            for (const e of list) {
+                if (t === 'zombie' && e.mobType === 'giant') continue;
+                if (aabbIntersects(box, this.getBetaEntityBox(t, e))) count++;
+            }
+        }
+        return count;
+    }
+
+    // EntityLiving.despawnEntity plus entityAge bookkeeping, once per game tick.
+    applyBetaDespawnState(entity, type, playerPos) {
+        for (let t = 0; t < this.betaTicksThisUpdate; t++) this.betaDespawnTick(entity, type, playerPos);
+    }
+
+    betaDespawnTick(entity, type, playerPos) {
+        if (!entity || entity._forceDespawn) return;
+        const health = Number(entity.health);
+        // attackEntityFrom resets entityAge.
+        if (Number.isFinite(entity._betaLastHealth) && health < entity._betaLastHealth) entity._despawnAgeTicks = 0;
+        entity._betaLastHealth = health;
+        if (entity._dead) return;
+        const age = entity._despawnAgeTicks || 0;
+        if (BETA_ENTITY_MOB_TYPES.has(type)) {
+            // EntityMob.onLivingUpdate ages mobs faster in bright light.
+            entity._despawnAgeTicks = age + (this.getBetaEntityBrightness(entity, type) > 0.5 ? 2 : 0);
+        }
+        if (BETA_NON_AGING_TYPES.has(type)) {
+            // Squid, slime and ghast call despawnEntity without ageing.
+            this.betaDespawnEntity(entity, playerPos);
+            return;
+        }
+        // EntityCreature only falls back to EntityLiving's AI (age + despawn) without a path.
+        const hasPath = !!entity.target || (entity.walkSpeed || 0) > 0.01;
+        if (hasPath && randInt(100) !== 0) return;
+        entity._despawnAgeTicks = (entity._despawnAgeTicks || 0) + 1;
+        this.betaDespawnEntity(entity, playerPos);
+    }
+
+    betaDespawnEntity(entity, playerPos) {
+        if (!playerPos || entity._persistenceRequired || entity.tamed) return;
+        const dx = playerPos.x - entity.pos.x;
+        const dy = (playerPos.y + 0.12) - entity.pos.y; // Beta player posY (eye) minus mob feet
+        const dz = playerPos.z - entity.pos.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 > 16384) entity._forceDespawn = true;
+        if ((entity._despawnAgeTicks || 0) > 600 && randInt(800) === 0) {
+            if (d2 < 1024) entity._despawnAgeTicks = 0;
+            else entity._forceDespawn = true;
+        }
     }
 
     getSpawnParitySnapshot(playerPos = this.lastPlayerPos) {
-        const eligibleColumns = playerPos ? this.getEligibleSpawnChunkColumns(playerPos) : [];
-        const spawnableColumns = eligibleColumns.filter((c) => !c.border && c.loaded);
-        const isNether = this.getDimension && this.getDimension() === 'NETHER';
-        const creatureCount = this.pigs.length + this.chickens.length + this.sheep.length + this.cows.length + this.wolves.length;
-        const waterCount = this.squids.length;
-        const hostileCount = isNether
-            ? (this.ghasts.length + this.zombiePigmen.length)
-            : (this.creepers.length + this.getNaturalZombieCount() + this.spiders.length + this.skeletons.length + this.slimes.length);
-        return {
-            eligibleCount: eligibleColumns.length,
-            spawnableCount: spawnableColumns.length,
-            caps: {
-                creature: this.getCreatureCap(playerPos, eligibleColumns.length),
-                water: this.getWaterCreatureCap(playerPos, eligibleColumns.length),
-                monster: this.getMonsterCap(playerPos, eligibleColumns.length)
-            },
-            counts: {
-                creature: creatureCount,
-                water: waterCount,
-                monster: hostileCount
-            },
-            cooldowns: {
-                passive: this.passiveSpawnCooldownTicks,
-                water: this.waterSpawnCooldownTicks,
-                hostile: this.hostileSpawnCooldownTicks
-            }
-        };
-    }
-
-    debugTrySpawnTypeAt(type, x, z, playerPos = this.lastPlayerPos) {
-        return this.trySpawnTypeAt(String(type || ''), Number(x), Number(z), playerPos || null);
-    }
-
-    debugTrySpawnGroupInChunk(type, cx, cz, playerPos = this.lastPlayerPos, maxToSpawn = Infinity) {
-        return this.trySpawnGroupInChunk(String(type || ''), Math.floor(Number(cx)), Math.floor(Number(cz)), playerPos || null, maxToSpawn);
-    }
-
-    debugCanNaturalSpawnTypeInBiome(type, biomeName) {
-        return this.canNaturalSpawnTypeInBiome(String(type || ''), String(biomeName || 'plains'));
-    }
-
-    debugGetSpawnGroupBounds(type) {
-        const t = String(type || '');
-        const b = SPAWN_GROUP_BOUNDS[t] || [1, 4];
-        return { min: Math.max(1, Math.floor(b[0])), max: Math.max(1, Math.floor(b[1])) };
-    }
-
-    debugGetPassiveSpawnWeightsForBiome(biomeName) {
-        const table = this.getPassiveSpawnWeightsForBiome(String(biomeName || 'plains'));
-        return Array.isArray(table) ? table.map((e) => ({ type: String(e[0]), weight: Number(e[1]) || 0 })) : [];
-    }
-
-    debugEvaluateHostileDespawn(input = {}) {
-        const dist = Math.max(0, Number(input.dist) || 0);
-        const ageTicks = Number.isFinite(Number(input.ageTicks)) ? Number(input.ageTicks) : 601;
-        const dt = Number.isFinite(Number(input.dt)) ? Number(input.dt) : 1.0;
-        const entity = {
-            pos: new THREE.Vector3(dist, 0, 0),
-            _despawnAgeTicks: ageTicks,
-            _forceDespawn: false,
-            _persistenceRequired: !!input.persistenceRequired,
-            tamed: !!input.tamed,
-            _dead: false,
-            target: input.target ? { x: 0, y: 0, z: 0 } : null
-        };
-        const playerPos = new THREE.Vector3(0, 0, 0);
-        this.applyHostileDespawnState(entity, playerPos, dt);
-        return {
-            forceDespawn: !!entity._forceDespawn,
-            despawnAgeTicks: Number(entity._despawnAgeTicks) || 0
-        };
-    }
-
-    debugEvaluateAmbientDespawn(input = {}) {
-        const dist = Math.max(0, Number(input.dist) || 0);
-        const ageTicks = Number.isFinite(Number(input.ageTicks)) ? Number(input.ageTicks) : 601;
-        const dt = Number.isFinite(Number(input.dt)) ? Number(input.dt) : 1.0;
-        const entity = {
-            pos: new THREE.Vector3(dist, 0, 0),
-            _despawnAgeTicks: ageTicks,
-            _forceDespawn: false,
-            _persistenceRequired: !!input.persistenceRequired,
-            tamed: !!input.tamed
-        };
-        const playerPos = new THREE.Vector3(0, 0, 0);
-        this.applyAmbientDespawnState(entity, playerPos, dt);
-        return {
-            forceDespawn: !!entity._forceDespawn,
-            despawnAgeTicks: Number(entity._despawnAgeTicks) || 0
-        };
-    }
-
-    runPassiveSpawnCycle(playerPos, eligibleColumns, spawnableColumns) {
-        if (!playerPos || spawnableColumns.length === 0) return;
-        let creatureCount = this.pigs.length + this.chickens.length + this.sheep.length + this.cows.length + this.wolves.length;
-        const creatureCap = this.getCreatureCap(playerPos, eligibleColumns.length);
-        if (creatureCount >= creatureCap) return;
-        const attempts = Math.max(1, Math.floor(spawnableColumns.length / 8));
-        for (let attempt = 0; attempt < attempts; attempt++) {
-            if (creatureCount >= creatureCap) break;
-            const chosen = spawnableColumns[Math.floor(Math.random() * spawnableColumns.length)];
-            if (!chosen) continue;
-            const wx = chosen.cx * CHUNK_SIZE + (CHUNK_SIZE >> 1);
-            const wz = chosen.cz * CHUNK_SIZE + (CHUNK_SIZE >> 1);
-            const biome = this.getBiomeAtWorldXZ(wx, wz);
-            const type = this.pickWeightedSpawnType(this.getPassiveSpawnWeightsForBiome(biome));
-            if (!type) continue;
-            const remaining = Math.max(0, creatureCap - creatureCount);
-            if (remaining <= 0) break;
-            const spawned = this.trySpawnGroupInChunk(type, chosen.cx, chosen.cz, playerPos, remaining);
-            creatureCount += spawned;
+        const eligibleCount = (BETA_SPAWN_CHUNK_RADIUS * 2 + 1) ** 2;
+        const caps = {};
+        const counts = {};
+        for (const kind of BETA_CREATURE_KINDS) {
+            caps[kind] = Math.floor(BETA_KIND_CAPS[kind] * eligibleCount / 256);
+            counts[kind] = this.countBetaKind(kind);
         }
+        return {
+            eligibleCount,
+            caps,
+            counts,
+            lightColumns: this.betaLight.columns.size,
+            lightPending: this.betaLight.pending.size,
+            hasPlayer: !!playerPos
+        };
     }
 
-    runWaterSpawnCycle(playerPos, eligibleColumns, spawnableColumns) {
-        if (!playerPos || spawnableColumns.length === 0) return;
-        let waterCount = this.squids.length;
-        const waterCap = this.getWaterCreatureCap(playerPos, eligibleColumns.length);
-        if (waterCount >= waterCap) return;
-        const attempts = Math.max(1, Math.floor(spawnableColumns.length / 8));
-        for (let attempt = 0; attempt < attempts; attempt++) {
-            if (waterCount >= waterCap) break;
-            const chosen = spawnableColumns[Math.floor(Math.random() * spawnableColumns.length)];
-            if (!chosen) continue;
-            const remaining = Math.max(0, waterCap - waterCount);
-            if (remaining <= 0) break;
-            const spawned = this.trySpawnGroupInChunk('squid', chosen.cx, chosen.cz, playerPos, remaining);
-            waterCount += spawned;
-        }
+    // Test hook: runs the Beta getCanSpawnHere rules for `type` at MindBlock position (x, y, z).
+    debugCanBetaSpawnAt(type, x, y, z, size = 1) {
+        this.betaChunkCache.clear();
+        return this.canBetaEntitySpawnHere(String(type || ''), Number(x) + 0.5, Number(y) + 0.5, Number(z) + 0.5, size);
     }
 
-    runHostileSpawnCycle(playerPos, eligibleColumns, spawnableColumns) {
-        if (!playerPos || spawnableColumns.length === 0) return;
-        const isNether = this.getDimension && this.getDimension() === 'NETHER';
-        let hostileCount = isNether
-            ? (this.ghasts.length + this.zombiePigmen.length)
-            : (this.creepers.length + this.getNaturalZombieCount() + this.spiders.length + this.skeletons.length + this.slimes.length);
-        const hostileCap = this.getMonsterCap(playerPos, eligibleColumns.length);
-        if (hostileCount >= hostileCap) return;
-        const weightedHostiles = isNether ? NETHER_HOSTILE_SPAWN_WEIGHTS : OVERWORLD_HOSTILE_SPAWN_WEIGHTS;
-        const attempts = Math.max(1, Math.floor(spawnableColumns.length / 8));
-        for (let attempt = 0; attempt < attempts; attempt++) {
-            if (hostileCount >= hostileCap) break;
-            const chosen = spawnableColumns[Math.floor(Math.random() * spawnableColumns.length)];
-            if (!chosen) continue;
-            const type = this.pickWeightedSpawnType(weightedHostiles);
-            if (!type) continue;
-            const remaining = Math.max(0, hostileCap - hostileCount);
-            if (remaining <= 0) break;
-            const spawned = this.trySpawnGroupInChunk(type, chosen.cx, chosen.cz, playerPos, remaining);
-            hostileCount += spawned;
+    // Test hook: Beta sky/block light at a block position (null until computed).
+    debugGetBetaLight(x, y, z) {
+        const packed = this.betaLight.getPacked(Math.floor(x), Math.floor(y), Math.floor(z));
+        if (packed < 0) {
+            this.betaLight.processPending(1000);
+            const again = this.betaLight.getPacked(Math.floor(x), Math.floor(y), Math.floor(z));
+            if (again < 0) return null;
+            return { sky: again >> 4, block: again & 15 };
         }
+        return { sky: packed >> 4, block: packed & 15 };
     }
 
     updatePigAI(pig, dt) {
@@ -5427,67 +5518,6 @@ export class MobManager {
         return true;
     }
 
-    applyHostileDespawnState(entity, playerPos, dt) {
-        if (!entity || !playerPos) return;
-        if (entity._persistenceRequired || entity.tamed) {
-            entity._despawnAgeTicks = 0;
-            entity._forceDespawn = false;
-            return;
-        }
-        const dx = entity.pos.x - playerPos.x;
-        const dy = entity.pos.y - playerPos.y;
-        const dz = entity.pos.z - playerPos.z;
-        const distSq = dx * dx + dy * dy + dz * dz;
-        if (entity.target && !entity._dead && distSq < 128 * 128) {
-            entity._despawnAgeTicks = 0;
-            entity._forceDespawn = false;
-            return;
-        }
-        entity._despawnAgeTicks = (entity._despawnAgeTicks || 0) + dt * TICKS_PER_SECOND;
-        if (distSq > 128 * 128) {
-            entity._forceDespawn = true;
-            return;
-        }
-        if (distSq < 32 * 32) {
-            entity._despawnAgeTicks = 0;
-            entity._forceDespawn = false;
-            return;
-        }
-        const dtTicks = Math.max(0, Number.isFinite(dt) ? dt * TICKS_PER_SECOND : 0);
-        const despawnChance = 1 - Math.pow(1 - (1 / 800), dtTicks);
-        if ((entity._despawnAgeTicks || 0) > 600 && Math.random() < despawnChance) {
-            entity._forceDespawn = true;
-        }
-    }
-
-    applyAmbientDespawnState(entity, playerPos, dt) {
-        if (!entity || !playerPos) return;
-        if (entity._persistenceRequired || entity.tamed) {
-            entity._despawnAgeTicks = 0;
-            entity._forceDespawn = false;
-            return;
-        }
-        const dx = entity.pos.x - playerPos.x;
-        const dy = entity.pos.y - playerPos.y;
-        const dz = entity.pos.z - playerPos.z;
-        const distSq = dx * dx + dy * dy + dz * dz;
-        entity._despawnAgeTicks = (entity._despawnAgeTicks || 0) + dt * TICKS_PER_SECOND;
-        if (distSq > 128 * 128) {
-            entity._forceDespawn = true;
-            return;
-        }
-        if (distSq < 32 * 32) {
-            entity._despawnAgeTicks = 0;
-            entity._forceDespawn = false;
-            return;
-        }
-        const dtTicks = Math.max(0, Number.isFinite(dt) ? dt * TICKS_PER_SECOND : 0);
-        const despawnChance = 1 - Math.pow(1 - (1 / 800), dtTicks);
-        if ((entity._despawnAgeTicks || 0) > 600 && Math.random() < despawnChance) {
-            entity._forceDespawn = true;
-        }
-    }
-
     tryTeleportWolfNearPlayer(w, playerPos) {
         const baseY = Math.floor(playerPos.y);
         for (let a = 0; a < 10; a++) {
@@ -6283,31 +6313,20 @@ export class MobManager {
 
     update(dt, playerPos) {
         this.lastPlayerPos = playerPos || null;
-        const eligibleColumns = playerPos ? this.getEligibleSpawnChunkColumns(playerPos) : [];
-        const spawnableColumns = eligibleColumns.filter((c) => !c.border && c.loaded);
+        this.betaChunkCache.clear();
         this.spawnTickAccumulator += dt * TICKS_PER_SECOND;
         let tickBudget = Math.max(0, Math.floor(this.spawnTickAccumulator));
         if (tickBudget > 4) tickBudget = 4; // clamp catch-up burst
         if (tickBudget > 0) {
             this.spawnTickAccumulator -= tickBudget;
         }
-        for (let i = 0; i < tickBudget; i++) {
-            this.passiveSpawnCooldownTicks = Math.max(0, (this.passiveSpawnCooldownTicks || 0) - 1);
-            this.waterSpawnCooldownTicks = Math.max(0, (this.waterSpawnCooldownTicks || 0) - 1);
-            this.hostileSpawnCooldownTicks = Math.max(0, (this.hostileSpawnCooldownTicks || 0) - 1);
-
-            if (this.passiveSpawnCooldownTicks <= 0) {
-                this.runPassiveSpawnCycle(playerPos, eligibleColumns, spawnableColumns);
-                this.passiveSpawnCooldownTicks = PASSIVE_SPAWN_PERIOD_TICKS;
+        this.betaTicksThisUpdate = tickBudget;
+        if (playerPos) {
+            for (let i = 0; i < tickBudget; i++) {
+                this.performBetaSpawning(playerPos);
+                this.updateBetaMobSpawners(playerPos);
             }
-            if (this.waterSpawnCooldownTicks <= 0) {
-                this.runWaterSpawnCycle(playerPos, eligibleColumns, spawnableColumns);
-                this.waterSpawnCooldownTicks = WATER_SPAWN_PERIOD_TICKS;
-            }
-            if (this.hostileSpawnCooldownTicks <= 0) {
-                this.runHostileSpawnCycle(playerPos, eligibleColumns, spawnableColumns);
-                this.hostileSpawnCooldownTicks = HOSTILE_SPAWN_PERIOD_TICKS;
-            }
+            this.betaLight.processPending(4);
         }
 
         this.updateSkeletonArrows(dt, playerPos);
@@ -6317,7 +6336,7 @@ export class MobManager {
 
         for (let i = this.pigs.length - 1; i >= 0; i--) {
             const pig = this.pigs[i];
-            this.applyAmbientDespawnState(pig, playerPos, dt);
+            this.applyBetaDespawnState(pig, 'pig', playerPos);
             const wholeTicks = Math.max(0, Math.floor(dt * TICKS_PER_SECOND));
             if (wholeTicks > 0) {
                 pig.loveTicks = Math.max(0, (pig.loveTicks || 0) - wholeTicks);
@@ -6368,7 +6387,7 @@ export class MobManager {
 
         for (let i = this.chickens.length - 1; i >= 0; i--) {
             const ch = this.chickens[i];
-            this.applyAmbientDespawnState(ch, playerPos, dt);
+            this.applyBetaDespawnState(ch, 'chicken', playerPos);
             if (!ch._dead) this.updateChickenPhysics(ch, dt);
             else ch.walkSpeed = 0;
             this.updateChickenVisual(ch, dt, playerPos);
@@ -6417,7 +6436,7 @@ export class MobManager {
 
         for (let i = this.sheep.length - 1; i >= 0; i--) {
             const s = this.sheep[i];
-            this.applyAmbientDespawnState(s, playerPos, dt);
+            this.applyBetaDespawnState(s, 'sheep', playerPos);
             if (!s._dead && (s.ageTicks || 0) < 0) {
                 s.ageTicks = Math.min(0, (s.ageTicks || 0) + dt * TICKS_PER_SECOND);
                 s.isBaby = s.ageTicks < 0;
@@ -6562,7 +6581,7 @@ export class MobManager {
 
         for (let i = this.cows.length - 1; i >= 0; i--) {
             const c = this.cows[i];
-            this.applyAmbientDespawnState(c, playerPos, dt);
+            this.applyBetaDespawnState(c, 'cow', playerPos);
             const wholeTicks = Math.max(0, Math.floor(dt * TICKS_PER_SECOND));
             if (wholeTicks > 0) {
                 c.loveTicks = Math.max(0, (c.loveTicks || 0) - wholeTicks);
@@ -6609,7 +6628,7 @@ export class MobManager {
 
         for (let i = this.creepers.length - 1; i >= 0; i--) {
             const c = this.creepers[i];
-            this.applyHostileDespawnState(c, playerPos, dt);
+            this.applyBetaDespawnState(c, 'creeper', playerPos);
             if (!c._dead) this.updateCreeperPhysics(c, dt);
             else c.walkSpeed = 0;
             this.updateCreeperVisual(c, dt);
@@ -6643,7 +6662,7 @@ export class MobManager {
 
         for (let i = this.zombies.length - 1; i >= 0; i--) {
             const z = this.zombies[i];
-            this.applyHostileDespawnState(z, playerPos, dt);
+            this.applyBetaDespawnState(z, 'zombie', playerPos);
             if (!z._dead) this.updateZombiePhysics(z, dt);
             else z.walkSpeed = 0;
             this.updateZombieVisual(z, dt);
@@ -6667,7 +6686,7 @@ export class MobManager {
 
         for (let i = this.spiders.length - 1; i >= 0; i--) {
             const s = this.spiders[i];
-            this.applyHostileDespawnState(s, playerPos, dt);
+            this.applyBetaDespawnState(s, 'spider', playerPos);
             if (!s._dead) this.updateSpiderPhysics(s, dt);
             else s.walkSpeed = 0;
             this.updateSpiderVisual(s, dt);
@@ -6691,9 +6710,10 @@ export class MobManager {
 
         for (let i = this.skeletons.length - 1; i >= 0; i--) {
             const s = this.skeletons[i];
-            this.applyHostileDespawnState(s, playerPos, dt);
+            this.applyBetaDespawnState(s, 'skeleton', playerPos);
             if (!s._dead) this.updateSkeletonPhysics(s, dt);
             else s.walkSpeed = 0;
+            this.updateBetaRider(s);
             this.updateSkeletonVisual(s, dt);
             if (s._forceDespawn || ((s._dead && (s.deathTimer || 0) <= 0) || s.pos.y < WORLD_DEPTH - 20)) {
                 if (s._dead && this.spawnDrop) {
@@ -6719,7 +6739,7 @@ export class MobManager {
 
         for (let i = this.slimes.length - 1; i >= 0; i--) {
             const s = this.slimes[i];
-            this.applyHostileDespawnState(s, playerPos, dt);
+            this.applyBetaDespawnState(s, 'slime', playerPos);
             if (!s._dead) this.updateSlimePhysics(s, dt, playerPos);
             else s.walkSpeed = 0;
             this.updateSlimeVisual(s, dt);
@@ -6727,11 +6747,14 @@ export class MobManager {
                 if (s._dead) {
                     const childSize = Math.floor((s.size || 1) / 2);
                     if (childSize >= 1) {
-                        const splitCount = 2 + Math.floor(Math.random() * 3); // 2..4
-                        for (let n = 0; n < splitCount; n++) {
-                            const ox = (Math.random() - 0.5) * 0.9;
-                            const oz = (Math.random() - 0.5) * 0.9;
-                            this.spawnSlime(s.pos.x + ox, s.pos.y, s.pos.z + oz, childSize);
+                        // EntitySlime.setEntityDead: four children, only when health is exactly 0.
+                        if (Number(s.health) === 0) {
+                            const size = s.size || 1;
+                            for (let n = 0; n < 4; n++) {
+                                const ox = ((n % 2) - 0.5) * size / 4;
+                                const oz = ((n >> 1) - 0.5) * size / 4;
+                                this.spawnSlime(s.pos.x + ox, s.pos.y + 0.5, s.pos.z + oz, childSize);
+                            }
                         }
                     } else if (this.spawnDrop) {
                         const dropCount = Math.floor(Math.random() * 3); // 0..2
@@ -6752,7 +6775,7 @@ export class MobManager {
 
         for (let i = this.ghasts.length - 1; i >= 0; i--) {
             const g = this.ghasts[i];
-            this.applyHostileDespawnState(g, playerPos, dt);
+            this.applyBetaDespawnState(g, 'ghast', playerPos);
             if (!g._dead) this.updateGhastPhysics(g, dt, playerPos);
             else g.walkSpeed = 0;
             this.updateGhastVisual(g, dt);
@@ -6775,7 +6798,7 @@ export class MobManager {
 
         for (let i = this.zombiePigmen.length - 1; i >= 0; i--) {
             const z = this.zombiePigmen[i];
-            this.applyHostileDespawnState(z, playerPos, dt);
+            this.applyBetaDespawnState(z, 'zombie_pigman', playerPos);
             if (!z._dead) this.updateZombiePigmanPhysics(z, dt);
             else z.walkSpeed = 0;
             this.updateZombiePigmanVisual(z, dt);
@@ -6798,7 +6821,7 @@ export class MobManager {
 
         for (let i = this.wolves.length - 1; i >= 0; i--) {
             const w = this.wolves[i];
-            this.applyAmbientDespawnState(w, playerPos, dt);
+            this.applyBetaDespawnState(w, 'wolf', playerPos);
             if (!w._dead) {
                 this.updateWolfPhysics(w, dt);
                 this.tryWolfAttackNearbySheep(w);
@@ -6816,7 +6839,7 @@ export class MobManager {
         }
         for (let i = this.squids.length - 1; i >= 0; i--) {
             const sq = this.squids[i];
-            this.applyAmbientDespawnState(sq, playerPos, dt);
+            this.applyBetaDespawnState(sq, 'squid', playerPos);
             if (!sq._dead) this.updateSquidPhysics(sq, dt);
             else sq.walkSpeed = 0;
             this.updateSquidVisual(sq, dt);
